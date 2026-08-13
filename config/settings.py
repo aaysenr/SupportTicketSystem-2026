@@ -106,9 +106,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
-LANGUAGE_CODE = "tr-tr"
+LANGUAGE_CODE = "tr-tr" # dil Türkçeye ç
 
-TIME_ZONE = "Europe/Istanbul"
+TIME_ZONE = "Europe/Istanbul" # saat dilimi 
 
 USE_I18N = True
 
