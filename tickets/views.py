@@ -2,6 +2,10 @@ from django.shortcuts import render, get_object_or_404, redirect
 from .models import Ticket
 from .forms import TicketForm,CommentForm # CommentForm sınıfını detay görünümünde kullanabilmek için içeri aktarır.
 from django.contrib.auth.models import User
+from django.db.models import Q  # Karmaşık arama sorguları (OR işlemleri) için Q nesnesini içeri aktarıyoruz
+#Q Nesnesi: Normalde Django ORM'de .filter(title=..., description=...) yazıldığında araya AND (VE) koyar. SQL'deki OR (VEYA) mantığını kurabilmek için Q nesnesini içeri aktarırız.
+
+
 
 # render: Django'nun HTML şablonlarını (template) verilerle birleştirip kullanıcıya sunmasını sağlayan pratik bir yardımcı fonksiyondur.
 # from .models import Ticket: Bulunduğumuz uygulama klasöründeki (.) models.py dosyasından veritabanı tablomuzu temsil eden Ticket modelini projeye dahil eder.
@@ -27,17 +31,87 @@ def ticket_list(request):
     # Django ORM (Object-Relational Mapper) kullanarak veritabanından tüm ticket kayıtlarını sorguluyoruz.
     # Veritabanından tüm talepleri oluşturulma tarihine göre (models.py'daki ordering kuralıyla) çekiyoruz
     
+    
+    # 1. Başlangıçta tüm talepleri çekiyoruz
     tickets = Ticket.objects.all()
     #Django'nun ORM (Object-Relational Mapper) yapısını kullanarak SQL komutu yazmadan veritabanındaki tüm biletleri (tickets) çekeriz.
     # Arka planda SELECT * FROM tickets_ticket; sorgusu çalıştırılır.
     # Eğer models.py dosyanızda ordering tanımlandıysa (örneğin en yeni bilet en üstte olacak şekilde), veriler bu sıraya göre tickets değişkenine atanır.
 
+    
+    
+    
+    # 2. URL'den gelen GET parametrelerini yakalıyoruz (Örn: /?q=yazici&status=open&priority=urgent)
+    search_query = request.GET.get('q', '')
+    selected_status = request.GET.get('status', '')
+    selected_priority = request.GET.get('priority', '')
+
+
+    #request.GET.get('anahtar', ''): Tarayıcı adres çubuğundaki parametreleri okur (Örn: /?q=yazici&status=open).
+    #Eğer parametre URL'de yoksa varsayılan olarak boş metin ('') döner, hata fırlatmaz.
+
+
+    # 3. Kelime Arama Filtresi (Başlıkta VEYA Açıklamada arar - icontains: büyük/küçük harf duyarsız arama)
+    if search_query:
+        tickets = tickets.filter(
+            Q(title__icontains=search_query) | Q(description__icontains=search_query)
+        )
+
+    #Q(title__icontains=search_query) | Q(description__icontains=search_query): Django ORM'e "ya başlıkta (title) aradığımız kelimeyi içeriyorsa VEYA açıklama (description) kısmında içeriyorsa getir" deriz.
+    #icontains:insensitive contain (küçük/büyük harf duyarsız içerir). SQL'deki ILIKE operatörünün Django karşılığıdır. Yani 'Yazıcı' ve 'yazıcı' aramalarını aynı sonucu verir.
+    # | : Python'daki VEYA operatörüdür. Django ORM, Q nesneleri ile kullanıldığında bunu SQL'deki OR operatörüne çevirir.
+    # tickets.filter(...): Mevcut ticket listesini (ki başlangıçta tüm liste idi) bu yeni kritere göre daraltır/filtrelersin.
+
+    # | Operatörü: Q(...) | Q(...) ifadesi SQL'deki OR bağlacıdır.
+    # __icontains: "Case-insensitive contains" anlamına gelir. Metnin büyük/küçük harf duyarsız olarak aranan kelimeyi içerip içermediğini denetler.
+    # Oluşan SQL: WHERE (title LIKE '%yazici%' OR description LIKE '%yazici%')
+
+
+
+    # 4. Durum Filtresi
+    if selected_status:
+        tickets = tickets.filter(status=selected_status)
+    
+    # selected_status: Eğer kullanıcı dropdown menülerden bir durum veya öncelik seçtiyse sorguya AND status = 'open' şeklinde ek filtre ekler.
+    # tickets.filter(status=selected_status): Mevcut ticket listesini, sadece durumu seçilen durumla eşleşen kayıtlar kalacak şekilde günceller.
+    # Eğer durum seçilmemişse bu satır atlanır ve filtreleme yapılmaz.
+    #Örn: status=open ise -> WHERE status='open' sorgusu eklenir.
+
+
+    # 5. Öncelik Filtresi
+    if selected_priority:
+        tickets = tickets.filter(priority=selected_priority)
+
+    # selected_priority: Eğer kullanıcı dropdown menülerden bir durum veya öncelik seçtiyse sorguya AND status = 'open' şeklinde ek filtre ekler.
+    # tickets.filter(priority=selected_priority): Mevcut ticket listesini, sadece önceliği seçilen öncelikle eşleşen kayıtlar kalacak şekilde günceller.
+    # Eğer öncelik seçilmemişse bu satır atlanır ve filtreleme yapılmaz.
+    # Örn: priority=urgent ise -> WHERE priority='urgent' sorgusu eklenir.
+    
+    
+    
+    
+    
+        # 6. HTML şablonuna hem filtrelenmiş verileri hem de seçili filtre durumlarını gönderiyoruz
+    
     # HTML şablonuna göndereceğimiz verileri bir dictionary (sözlük) haline getiriyoruz
     context = {
-        'tickets': tickets
+        'tickets': tickets,
+        'search_query': search_query,
+        'selected_status': selected_status,
+        'selected_priority': selected_priority,
+        'status_choices': Ticket.STATUS_CHOICES,
+        'priority_choices': Ticket.PRIORITY_CHOICES,
     }
     # Veritabanından çekilen veriyi HTML şablonuna aktarabilmek için bir Python dictionary (sözlük) yapısı oluşturulur.
     # Sözlükteki 'tickets' anahtarı, HTML tarafında bu verilere erişmek için kullanacağımız değişken adı olacaktır.
+
+    """
+    Formu Hatırlama: search_query, selected_status ve selected_priority şablona geri gönderilir; 
+    böylece filtreleme yapıldıktan sonra kullanıcının yazdığı arama metni ve seçtiği dropdown kutusu seçili kalır.
+    STATUS_CHOICES & PRIORITY_CHOICES: Modelde tanımladığımız durum ve öncelik listelerini HTML tarafında <select> seçenekleri olarak döngüye sokmak için göndeririz.
+    """
+
+
 
     # Şablonu ve veriyi birleştirip kullanıcıya HTML yanıtı dönüyoruz
     return render(request, 'tickets/ticket_list.html', context)
