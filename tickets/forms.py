@@ -9,7 +9,7 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
     class Meta: # Django'ya bu formun hangi modeli kullanacağını ve hangi alanları göstereceğini bildirir
         model = Ticket # Formun Ticket veritabanı tablosundan türetileceğini belirtir.
         # Formda kullanıcının doldurmasını istediğimiz alanlar:
-        fields = ['title', 'category', 'priority', 'description']
+        fields = ['title', 'category', 'priority', 'status','description']
 
         # Form alanlarının HTML görünümünü ve davranışlarını (placeholder, class, rows vb.) tanımlar.
         # ModelForm içindeki Meta sınıfında tanımlanan bu bölüm,
@@ -43,6 +43,9 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
             'priority': forms.Select(attrs={
                 'class': 'form-select'
             }),
+            'status': forms.Select(attrs={
+                'class': 'form-select'
+            }),
             'description': forms.Textarea(attrs={
                 'class': 'form-control',
                 'rows': 5,
@@ -63,6 +66,8 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
 
         #description: Çok satırlı metin alanıdır (Textarea). rows: 5 ile kutunun 5 satır yüksekliğinde açılması sağlanır.
 
+        #status: Durum alanını bir açılır liste kutusu (<select>) olarak oluşturur ve Bootstrap'in form-select stilini uygular. Seçenekler models.py'daki STATUS_CHOICES listesinden otomatik doldurulur.
+
 
 
 
@@ -71,6 +76,7 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
             'title': 'Talep Başlığı',
             'category': 'Kategori',
             'priority': 'Öncelik Seviyesi',
+            'status': 'Talep Durumu',
             'description': 'Detaylı Açıklama',
         }
 

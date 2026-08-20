@@ -269,3 +269,49 @@ def ticket_create(request):
 
     # Form başarıyla kaydedildikten sonra kullanıcıyı yeni oluşturulan talebin detay sayfasına (/ticket/<id>/) yönlendirir.
     # Bu desen yazılım dünyasında Post/Redirect/Get (PRG) prensibi olarak bilinir ve kullanıcının F5 tuşuna basarak aynı talebi veritabanına mükerrer kaydetmesini önler.
+
+
+
+
+def ticket_edit(request, pk): 
+    # pk (Primary Key): Hangi talebin düzenleneceğini belirten kimlik numarasıdır (Örn: /ticket/3/edit/ için pk=3).
+    #pk: Var olan bir kaydı (bu durumda bir talebi) veritabanından benzersiz kimlik numarasına (Primary Key) göre bulup getirmek için URL'den alınan değişkendir.
+    
+    """
+    Var olan bir destek talebini düzenleme ve durumunu güncelleme görünümü (View)
+    """
+
+    # 1. Düzenlenecek talebi ID'ye göre veritabanından çek (bulamazsa 404 dön)
+    ticket = get_object_or_404(Ticket, pk=pk)
+    #Güvenli Nesne Çekme: Düzenlenmek istenen talep veritabanında mevcutsa ticket değişkenine atar; mevcut değilse sunucuyu çökertmeden 404 Not Found döner.
+
+    if request.method == 'POST':
+        # POST İsteği: Formdaki yeni verileri var olan 'ticket' nesnesinin üzerine yaz (instance=ticket)
+        form = TicketForm(request.POST, instance=ticket)
+        if form.is_valid():
+            form.save() # Var olan kaydı günceller (UPDATE sorgusu çalıştırır)
+            return redirect('ticket_detail', pk=ticket.pk)
+
+            """
+            instance=ticket (Kritik Parametre): Django'ya "Yeni bir satır oluşturma, gelen verileri bu mevcut ticket kaydının üzerine yaz" talimatını verir.
+
+            SQL Karşılığı: Arka planda INSERT INTO yerine doğrudan UPDATE tickets_ticket SET title=..., status=... WHERE id=3; sorgusu çalışır.
+
+            Yönlendirme: Güncelleme başarılı olduğunda kullanıcı doğrudan güncel detay sayfasına yönlendirilir (ticket_detail).
+            """
+
+
+    else:
+        # GET İsteği: Formu var olan talebin mevcut verileriyle dolu olarak aç (instance=ticket)
+        form = TicketForm(instance=ticket)
+        # Formu Dolu Açma (GET): Kullanıcı sayfaya ilk girdiğinde, form kutularının içine mevcut talep verilerini (başlık, mevcut durum, kategori vb.) otomatik olarak doldurur.
+
+    context = {
+        'form': form,
+        'ticket': ticket,
+    }
+    # Aynı ticket_form.html şablonunu tekrar kullanıyoruz!
+    return render(request, 'tickets/ticket_form.html', context)
+
+    # DRY (Don't Repeat Yourself) Prensibi: Sıfırdan yeni bir ticket_edit.html oluşturmak yerine, daha önce hazırladığımız ticket_form.html şablonunu tekrar kullanıyoruz. 
+    # context içerisine ticket bilgisini de ekleyerek şablon tarafında "Yeni Talep" mi yoksa "Talebi Düzenle" mi olduğunu ayırt edebilme esnekliği sağlıyoruz.

@@ -5,6 +5,7 @@ urlpatterns = [
     path('', views.ticket_list, name='ticket_list'), # Ana adres / geldiğinde ticket_list görünümünü çalıştır
     path('ticket/new/', views.ticket_create, name='ticket_create'), # Yeni talep oluşturma ( /ticket/new/ )
     path('ticket/<int:pk>/', views.ticket_detail, name='ticket_detail'), # Detay adresi (Örn: /ticket/1/)
+        path('ticket/<int:pk>/edit/', views.ticket_edit, name='ticket_edit'), # Talep düzenleme adresi
     
 ]
 
@@ -38,4 +39,30 @@ path('ticket/new/', views.ticket_create, name='ticket_create'):
 Tarayıcıdan [http://127.0.0.1:8000/ticket/new/](http://127.0.0.1:8000/ticket/new/) 
 adresine bir istek geldiğinde, views.py içerisindeki ticket_create fonksiyonunu tetikler.
  name='ticket_create' takma adı sayesinde HTML şablonlarında {% url 'ticket_create' %} yazarak bu sayfaya dinamik link verebiliriz.
+
+
+
+path('ticket/<int:pk>/edit/', views.ticket_edit, name='ticket_edit'):
+
+Tarayıcıdan gelen [http://127.0.0.1:8000/ticket/1/edit/](http://127.0.0.1:8000/ticket/1/edit/) gibi istekleri karşılar.
+
+<int:pk> parçası düzenlenecek talebin ID numarasını yakalar ve views.py içerisindeki ticket_edit(request, pk) fonksiyonuna aktarır.
+
+name='ticket_edit' takma adı sayesinde HTML şablonlarında {% url 'ticket_edit' ticket.id %} yazarak düzenleme sayfasına dinamik bağlantı vermeyi sağlar.
+
+
+
+URL Yapısının Sıralama Mantığı:
+
+ticket/new/: Sabit metin kuralı en üstte yer alır.
+
+ticket/<int:pk>/: Sadece sayısal ID içeren detay sayfalarını yakalar.
+
+ticket/<int:pk>/edit/: Sayısal ID ve ardından gelen /edit/ son ekini yakalayarak düzenleme ekranına yönlendirir. Çakışma olmadan her üç adres de bağımsız çalışır.
+
+
+
+
+
+
 """
