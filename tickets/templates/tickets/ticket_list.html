@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+
+{% block title %}Tüm Destek Talepleri - Destek Sistemi{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="h3 fw-bold text-gray-800 mb-0">Destek Talepleri</h2>
+    <a href="{% url 'ticket_create' %}" class="btn btn-success">
+        <i class="bi bi-plus-circle me-1"></i> Yeni Talep Oluştur
+    </a>
+
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>#ID</th>
+                        <th>Başlık</th>
+                        <th>Kategori</th>
+                        <th>Öncelik</th>
+                        <th>Durum</th>
+                        <th>Oluşturan</th>
+                        <th>Tarih</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ticket in tickets %}
+                    <tr>
+                        <td><strong>#{{ ticket.id }}</strong></td>
+                        <td>
+                            <a href="{% url 'ticket_detail' ticket.id %}"
+                                class="text-decoration-none fw-bold text-dark">
+                                {{ ticket.title }}
+                            </a>
+                        </td>
+                        <td>
+                            {% if ticket.category %}
+                            <span class="badge bg-secondary">{{ ticket.category.name }}</span>
+                            {% else %}
+                            <span class="badge bg-light text-dark">Kategorisiz</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if ticket.priority == 'urgent' %}
+                            <span class="badge bg-danger">Acil</span>
+                            {% elif ticket.priority == 'high' %}
+                            <span class="badge bg-warning text-dark">Yüksek</span>
+                            {% elif ticket.priority == 'medium' %}
+                            <span class="badge bg-info text-dark">Orta</span>
+                            {% else %}
+                            <span class="badge bg-light text-dark">Düşük</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if ticket.status == 'open' %}
+                            <span class="badge bg-primary">Açık</span>
+                            {% elif ticket.status == 'in_progress' %}
+                            <span class="badge bg-warning text-dark">Devam Ediyor</span>
+                            {% elif ticket.status == 'resolved' %}
+                            <span class="badge bg-success">Çözüldü</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Kapalı</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ ticket.created_by.username }}</td>
+                        <td>{{ ticket.created_at|date:"d.m.Y H:i" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-4 text-muted">
+                            <i class="bi bi-inbox display-6 d-block mb-2"></i>
+                            Henüz hiç destek talebi bulunmuyor.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

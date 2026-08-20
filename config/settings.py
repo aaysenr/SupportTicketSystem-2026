@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     # Benim uygulamam:
     'tickets', 
     #Django'nun tickets adında bir uygulama oluşturduğumumdan haberdar olması için onu ana ayarlara tanıtıyorum.
+
+    
 ]
 
 MIDDLEWARE = [
@@ -58,7 +60,7 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        'DIRS': [BASE_DIR / 'templates'], # Buradaki DIRS listesine bunu ekliyoruz
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [

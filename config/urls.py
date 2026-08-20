@@ -14,9 +14,21 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+
+
+
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include  # <-- include eklendi
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path('admin/', admin.site.urls),
+    path('', include('tickets.urls')), # <-- Ana adrese bağladık
 ]
+
+"""
+from django.urls import path, include: Başka bir URL dosyasını ana haritaya bağlamamızı sağlayan include modülünü içe aktarır.
+
+path('', include('tickets.urls')):
+Kullanıcı ana adrese ([http://127.0.0.1:8000/](http://127.0.0.1:8000/)) geldiğinde,
+homepage direkt tickets list sayfasına yonlendirir.
+"""
