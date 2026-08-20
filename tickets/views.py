@@ -1,6 +1,6 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from .models import Ticket
-from .forms import TicketForm
+from .forms import TicketForm,CommentForm # CommentForm sınıfını detay görünümünde kullanabilmek için içeri aktarır.
 from django.contrib.auth.models import User
 
 # render: Django'nun HTML şablonlarını (template) verilerle birleştirip kullanıcıya sunmasını sağlayan pratik bir yardımcı fonksiyondur.
@@ -103,13 +103,86 @@ def ticket_detail(request, pk):
     """
     
     
+    if request.method == 'POST':
+        # Yorum gönderme butonu tıklandıysa (POST isteği)
+        comment_form = CommentForm(request.POST)
+        if comment_form.is_valid():
+
+            #if request.method == 'POST': Kullanıcı detay sayfasındaki "Yorum Yap / Gönder" butonuna bastığında çalışır.
+
+            #CommentForm(request.POST): Kullanıcının form kutusuna yazdığı metni forma doldurur.
+
+            #comment_form.is_valid(): Yorum alanının boş bırakılıp bırakılmadığını veya kural ihlali olup olmadığını denetler.
+
+
+
+
+
+
+            # Yorum nesnesini oluştur ama veritabanına henüz yazma (ticket ve author bilgisi eksik!)
+            comment = comment_form.save(commit=False)
+            
+            # Yorumun yazıldığı talebi (ticket) ilişkilendir
+            comment.ticket = ticket
+
+
+            #commit=False: Yorum nesnesini bellekte oluşturur ama henüz SQL INSERT yapmaz.
+
+            #comment.ticket = ticket (Kritik Adım): TicketComment modeli hangi talebe yorum yapıldığını bilmek zorundadır (ForeignKey). 
+            #Kullanıcıya formda talep seçtirmedik; URL'den çektiğimiz mevcut ticket nesnesini yoruma burada arka planda bağlıyoruz.
+            
+
+
+
+
+            # Yorumu yazan kullanıcıyı atayalım
+            if request.user.is_authenticated:
+                comment.author = request.user
+            else:
+                comment.author = User.objects.first()
+                
+            # Artık tam kaydı veritabanına yazalım
+            comment.save()
+
+
+            #comment.author: Yorumu yazan kişiyi (author) oturum açmış kullanıcı olarak atar (oturum yoksa geliştirme ortamında ilk kullanıcıyı atar).
+
+            #comment.save(): Talebi, yazarı ve içeriği artık eksiksiz olan yorumu veritabanına fiziksel olarak kaydeder.
+
+
+
+
+
+
+            #return redirect('ticket_detail', pk=ticket.pk): İşlem başarılı olduğu için tarayıcıyı 
+            #tam olarak aynı sayfanın (talebin detay sayfası) yenilenmiş haline yönlendirir. 
+            #Böylece kullanıcı, sayfayı manuel yenilemeden yeni yorumunu hemen listede görür.
+
+            # Sayfayı yenileyerek yorumun anında görünmesini sağla
+            return redirect('ticket_detail', pk=ticket.pk)
+
+            #Sayfayı Yeniden Yükleme (PRG Prensibi): Kayıt bitince sayfayı temiz bir GET isteğiyle yeniden açar. 
+            #Böylece yeni yazılan yorum anında sayfada belirir ve kullanıcı sayfayı yenilediğinde (F5) aynı yorum mükerrer eklenmez.
+
+
+
+    else:
+        # Sayfa ilk kez açıldıysa (GET isteği) boş yorum formu üret
+        comment_form = CommentForm()
+
+
+
+        #Sayfaya ilk kez girildiğinde (GET), 
+        #kullanıcıya sunulmak üzere boş bir CommentForm() üretilir 
+        #ve context paketine eklenerek HTML şablonuna gönderilir.
+
     
     
-    
-    # 3. HTML şablonuna gönderilecek veri paketini hazırlıyoruz
+    # 3. HTML şablonuna gönderilecek veri paketini hazırlınır
     context = {
         'ticket': ticket,
         'comments': comments,
+        'comment_form': comment_form,
     }
 
     """

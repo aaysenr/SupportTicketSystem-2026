@@ -1,5 +1,5 @@
 from django import forms # from django import forms: Django'nun form oluşturma, doğrulama ve widget yönetim modülünü içeri aktarır
-from .models import Ticket # Formun hangi veritabanı tablosunu temel alacağını belirtmek için Ticket modelini içe aktarır.
+from .models import Ticket, TicketComment # Formun hangi veritabanı tablosunu temel alacağını belirtmek için Ticket ve TicketComment modelini içe aktarır.
 
 class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından türeyen bir form sınıfı tanımlar. Bu sayede Ticket modelindeki alanları otomatik olarak bir web formuna dönüştürür.
     """
@@ -79,3 +79,44 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
         #labels (Alan Etiketleri): Form alanlarının üzerinde kullanıcıya görünecek olan Türkçe başlıkları tanımlar (Örneğin: priority alanı yerine ekranda "Öncelik Seviyesi" yazar).
 
 
+
+class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras alarak TicketComment modeline bağlı bir form sınıfı oluşturur.
+    """
+    TicketComment modeline dayalı yorum ekleme formu.
+    """
+    class Meta:
+        model = TicketComment # Formun bağlanacağı veritabanı tablosunu seçer.
+        fields = ['content'] # Formda gösterilecek alanlar.
+
+        #model = TicketComment: Formun veritabanındaki TicketComment tablosuyla eşleşeceğini belirtir.
+
+        #fields = ['content']: Formda yalnızca yorum içeriği alanının yer alacağını tanımlar. ticket, author ve created_at alanları hariç tutulur; bu bilgileri views.py içinde arka planda biz bağlayacağız.
+
+        
+        widgets = {
+            'content': forms.Textarea(attrs={
+                'class': 'form-control',
+                'rows': 3,
+                'placeholder': 'Yanıtınızı veya güncellemenizi buraya yazınız...'
+            }),
+        }
+        
+        # widgets (Görsel Özelleştirme):
+
+        # forms.Textarea: Yorum kutusunu çok satırlı metin alanı (<textarea>) olarak üretir.
+
+        # 'class': 'form-control': Kutuyu Bootstrap form stiliyle tam genişlikli ve modern kenarlıklı hale getirir.
+
+        # 'rows': 3: Kutunun dikey yüksekliğini 3 satır olarak sınırlar (detay sayfasını gereksiz şişirmez).
+
+        # 'placeholder': Kullanıcı kutuya tıklamadan önce görünen gri rehber ipucu metnini tanımlar.
+
+
+
+
+
+        labels = {
+            'content': 'Yorum / Cevap Yazın',
+        }
+
+        #labels: Kutunun hemen üstünde HTML <label> olarak görünecek başlığı Türkçeleştirir.

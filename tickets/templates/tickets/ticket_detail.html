@@ -65,14 +65,13 @@
         <!-- Talebin Açıklaması -->
         <div class="ticket-description">
             <h5 class="fw-bold text-secondary mb-2">Talep Açıklaması:</h5>
-            <!-- linebreaks filtresi metindeki alt satıra geçişleri (Enter) HTML <br> etiketine dönüştürür -->
             <p class="card-text fs-6 lead text-dark">{{ ticket.description|linebreaks }}</p>
         </div>
     </div>
 </div>
 
-<!-- Yorumlar Bölümü -->
-<div class="card shadow-sm">
+<!-- Yorumlar Geçmişi Kartı -->
+<div class="card shadow-sm mb-4">
     <div class="card-header bg-light py-3">
         <h5 class="mb-0 fw-bold">
             <i class="bi bi-chat-left-text me-2"></i>Yorumlar ve Güncellemeler ({{ comments.count }})
@@ -93,9 +92,37 @@
         {% empty %}
         <div class="text-center py-3 text-muted">
             <i class="bi bi-chat-square-dots display-6 d-block mb-2"></i>
-            Bu talebe henüz hiç yorum yapılmamış.
+            Bu talebe henüz hiç yorum yapılmamış. İlk yorumu aşağıdan ekleyebilirsiniz.
         </div>
         {% endfor %}
+    </div>
+</div>
+
+<!-- Yeni Yorum Ekleme Kartı -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white py-3">
+        <h5 class="mb-0 fw-bold text-dark">
+            <i class="bi bi-reply-fill me-2"></i>Yanıt Ekleyin
+        </h5>
+    </div>
+    <div class="card-body p-4">
+        <form method="POST">
+            {% csrf_token %}
+            <div class="mb-3">
+                <label for="{{ comment_form.content.id_for_label }}" class="form-label fw-bold">
+                    {{ comment_form.content.label }}
+                </label>
+                {{ comment_form.content }}
+                {% if comment_form.content.errors %}
+                <div class="text-danger small mt-1">{{ comment_form.content.errors }}</div>
+                {% endif %}
+            </div>
+            <div class="d-flex justify-content-end">
+                <button type="submit" class="btn btn-primary px-4">
+                    <i class="bi bi-send me-1"></i> Yorumu Gönder
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 {% endblock %}
