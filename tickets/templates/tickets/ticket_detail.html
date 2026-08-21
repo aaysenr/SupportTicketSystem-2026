@@ -8,11 +8,20 @@
     <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm">
         <i class="bi bi-arrow-left me-1"></i> Tüm Taleplere Dön
     </a>
-    <!-- Talebi Düzenle Butonu -->
-    <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm">
-        <i class="bi bi-pencil me-1"></i> Talebi Düzenle / Durum Değiştir
-    </a>
+
+    <!-- Yalnızca Talep Sahibi veya Yönetici Butonları Görebilir -->
+    {% if user == ticket.created_by or user.is_staff %}
+    <div class="btn-group" role="group">
+        <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-pencil me-1"></i> Talebi Düzenle / Durum Değiştir
+        </a>
+        <a href="{% url 'ticket_delete' ticket.id %}" class="btn btn-outline-danger btn-sm">
+            <i class="bi bi-trash me-1"></i> Talebi Sil
+        </a>
+    </div>
+    {% endif %}
 </div>
+
 
 <!-- Talep Detay Kartı -->
 <div class="card shadow-sm mb-4">

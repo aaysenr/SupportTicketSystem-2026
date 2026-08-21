@@ -6,8 +6,9 @@ urlpatterns = [
     path('', views.ticket_list, name='ticket_list'), # Ana adres / geldiğinde ticket_list görünümünü çalıştır
     path('ticket/new/', views.ticket_create, name='ticket_create'), # Yeni talep oluşturma ( /ticket/new/ )
     path('ticket/<int:pk>/', views.ticket_detail, name='ticket_detail'), # Detay adresi (Örn: /ticket/1/)
-        path('ticket/<int:pk>/edit/', views.ticket_edit, name='ticket_edit'), # Talep düzenleme adresi
-    
+    path('ticket/<int:pk>/edit/', views.ticket_edit, name='ticket_edit'), # Talep düzenleme adresi
+    path('ticket/<int:pk>/delete/', views.ticket_delete, name='ticket_delete'),
+
     # Kullanıcı Kimlik Doğrulama (Auth) İşlemleri
     path('register/', views.register_user, name='register'),
     path('login/', views.login_user, name='login'),
@@ -83,6 +84,18 @@ path('login/', ... name='login'):
 path('logout/', ... name='logout'):
 
 /logout/ adresi oturumu sonlandırıp kullanıcıyı tekrar login ekranına atar
+
+
+
+
+Dinamik Parametre (<int:pk>): URL'deki sayısal ID'yi yakalar (Örn: /ticket/4/delete/ için pk=4) ve views.ticket_delete(request, pk) fonksiyonuna iletir.
+İsimlendirme:
+ (name='ticket_delete'): Şablonlarda {% url 'ticket_delete' ticket.id %} şeklinde temiz, dinamik bağlantılar oluşturmayı sağlar.
+ URL Sıralama Mantığı:
+ ticket/new/ ---- Statik kural
+ ticket/<int:pk>/ ----- Detay kuralı
+ ticket/<int:pk>/edit/ ----- Düzenleme kuralı
+ ticket/<int:pk>/delete/ ------- Silme onay kuralı
 
 
 """

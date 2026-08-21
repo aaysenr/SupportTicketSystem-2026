@@ -168,21 +168,21 @@ def ticket_list(request):
     # Django'da bir sayfa istendiğinde çalışacak fonksiyon tanımlanır.
 
     # request: Tarayıcıdan gelen HTTP isteğine dair tüm bilgileri (kullanıcı oturumu, ip adresi, form verileri vb.) taşıyan zorunlu parametredir.
-    
+     
     """
-    Tüm destek taleplerini veritabanından çekip listeleyen görünüm (View)
+    Talepleri listeleyen görünüm.
+    - Yöneticiler (is_staff) TÜM talepleri görür.
+    - Normal kullanıcılar SADECE kendi açtıkları talepleri görür.
     """
-    # Django ORM (Object-Relational Mapper) kullanarak veritabanından tüm ticket kayıtlarını sorguluyoruz.
-    # Veritabanından tüm talepleri oluşturulma tarihine göre (models.py'daki ordering kuralıyla) çekiyoruz
-    
-    
-    # 1. Başlangıçta tüm talepleri çekiyoruz
-    tickets = Ticket.objects.all()
-    #Django'nun ORM (Object-Relational Mapper) yapısını kullanarak SQL komutu yazmadan veritabanındaki tüm biletleri (tickets) çekeriz.
-    # Arka planda SELECT * FROM tickets_ticket; sorgusu çalıştırılır.
-    # Eğer models.py dosyanızda ordering tanımlandıysa (örneğin en yeni bilet en üstte olacak şekilde), veriler bu sıraya göre tickets değişkenine atanır.
+    if request.user.is_staff:
+        tickets = Ticket.objects.all()
+    else:
+        tickets = Ticket.objects.filter(created_by=request.user)
 
-    
+    #request.user.is_staff: Kullanıcının yönetici / teknik destek ekibinde olup olmadığını kontrol eder.
+
+    #filter(created_by=request.user): Standart kullanıcıya ait olmayan talepleri daha SQL seviyesinde ayıklar (WHERE created_by_id = ?). 
+    # Arama ve filtreler de sadece bu daraltılmış liste üzerinde çalışır.
     
     
     # 2. URL'den gelen GET parametrelerini yakalıyoruz (Örn: /?q=yazici&status=open&priority=urgent)
@@ -302,15 +302,18 @@ def ticket_detail(request, pk):
     
     """
 
+    
+    # Güvenlik & Gizlilik Kontrolü: Talebi oluşturan kişi veya yönetici değilse engelle
+    if not request.user.is_staff and ticket.created_by != request.user:
+        messages.error(request, "Bu destek talebini görüntüleme yetkiniz yok!")
+        return redirect('ticket_list')
 
+        #IDOR Güvenlik Duvarı: Kullanıcı ne yöneticiyse ne de o talebin bizzat sahibiyse, işlem hemen kesilir; 
+        #kırmızı bir hata mesajıyla ana sayfaya postalanır.
 
-
-
-
-    # 2. İlgili talebe yapılan yorumları çekme:
-    # models.py dosyamızda TicketComment modelindeki 'ticket' alanına related_name='comments' vermiştik.
-    # Bu sayede 'ticket.comments.all()' diyerek o talebe ait tüm yorumları tarihe göre çekebiliriz.
     comments = ticket.comments.all()
+
+
     
     """
     Ters İlişki (Reverse Relation): models.py dosyasında TicketComment modelini yazarken ticket = ForeignKey(Ticket, related_name='comments') tanımlaması yapmıştık.
@@ -502,6 +505,13 @@ def ticket_edit(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
     #Güvenli Nesne Çekme: Düzenlenmek istenen talep veritabanında mevcutsa ticket değişkenine atar; mevcut değilse sunucuyu çökertmeden 404 Not Found döner.
 
+   
+    # Güvenlik Kontrolü
+    if not request.user.is_staff and ticket.created_by != request.user:
+        messages.error(request, "Bu destek talebini düzenleme yetkiniz yok!")
+        return redirect('ticket_list')
+
+ 
     if request.method == 'POST':
         # POST İsteği: Formdaki yeni verileri var olan 'ticket' nesnesinin üzerine yaz (instance=ticket)
         form = TicketForm(request.POST, instance=ticket)
@@ -533,3 +543,37 @@ def ticket_edit(request, pk):
 
     # DRY (Don't Repeat Yourself) Prensibi: Sıfırdan yeni bir ticket_edit.html oluşturmak yerine, daha önce hazırladığımız ticket_form.html şablonunu tekrar kullanıyoruz. 
     # context içerisine ticket bilgisini de ekleyerek şablon tarafında "Yeni Talep" mi yoksa "Talebi Düzenle" mi olduğunu ayırt edebilme esnekliği sağlıyoruz.
+
+
+
+@login_required
+def ticket_delete(request, pk):
+    """
+    Destek talebi silme görünümü.
+    GET isteğinde onay sayfasını gösterir, POST isteğinde talebi kalıcı olarak siler.
+    """
+    ticket = get_object_or_404(Ticket, pk=pk)
+    # Güvenlik Kontrolü
+    if not request.user.is_staff and ticket.created_by != request.user:
+        messages.error(request, "Bu destek talebini silme yetkiniz yok!")
+        return redirect('ticket_list')
+    if request.method == 'POST':
+        ticket_title = ticket.title
+        ticket.delete() # Veritabanından kalıcı olarak siler
+        messages.success(request, f"'{ticket_title}' başlıklı talep başarıyla silindi.")
+        return redirect('ticket_list')
+    context = {'ticket': ticket}
+    return render(request, 'tickets/ticket_confirm_delete.html', context)
+
+
+
+    """
+    ticket = get_object_or_404(Ticket, pk=pk): Silinecek kaydı bulur.
+
+    if request.method == 'POST': Kullanıcı onay ekranındaki "Evet, Sil" butonuna bastığında çalışır.
+
+    ticket.delete(): İlgili talebi ve veritabanındaki CASCADE kuralı sayesinde bu talebe bağlı tüm yorumları (TicketComment) veritabanından kalıcı olarak temizler.
+
+    ticket_confirm_delete.html: GET isteğinde kullanıcıya "Emin misiniz?" onay kartını sunar.
+
+    """

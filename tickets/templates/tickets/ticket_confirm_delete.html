@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+
+{% block title %}Talebi Sil - Destek Sistemi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-danger mt-4">
+            <div class="card-header bg-danger text-white fw-bold">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i> Talep Silme Onayı
+            </div>
+            <div class="card-body p-4">
+                <h5 class="card-title fw-bold text-dark mb-3">
+                    "{{ ticket.title }}" başlıklı destek talebini silmek istediğinizden emin misiniz?
+                </h5>
+                <p class="card-text text-muted small">
+                    Bu işlem geri alınamaz. Bu talebe yazılmış tüm yorumlar da veritabanından kalıcı olarak silinecektir.
+                </p>
+
+                <form method="POST">
+                    {% csrf_token %}
+                    <div class="d-flex justify-content-end gap-2 mt-4">
+                        <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-secondary">
+                            <i class="bi bi-x-circle me-1"></i> İptal
+                        </a>
+                        <button type="submit" class="btn btn-danger fw-bold">
+                            <i class="bi bi-trash me-1"></i> Evet, Kalıcı Olarak Sil
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
