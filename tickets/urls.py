@@ -2,11 +2,16 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # Talep İşlemleri
     path('', views.ticket_list, name='ticket_list'), # Ana adres / geldiğinde ticket_list görünümünü çalıştır
     path('ticket/new/', views.ticket_create, name='ticket_create'), # Yeni talep oluşturma ( /ticket/new/ )
     path('ticket/<int:pk>/', views.ticket_detail, name='ticket_detail'), # Detay adresi (Örn: /ticket/1/)
         path('ticket/<int:pk>/edit/', views.ticket_edit, name='ticket_edit'), # Talep düzenleme adresi
     
+    # Kullanıcı Kimlik Doğrulama (Auth) İşlemleri
+    path('register/', views.register_user, name='register'),
+    path('login/', views.login_user, name='login'),
+    path('logout/', views.logout_user, name='logout'),
 ]
 
 
@@ -62,7 +67,22 @@ ticket/<int:pk>/edit/: Sayısal ID ve ardından gelen /edit/ son ekini yakalayar
 
 
 
+# AUTH KISMI:
+path('register/', ... name='register'):
 
+Tarayıcıdan /register/ adresine gidildiğinde views.register_user çalışır ve register.html formunu ekrana basar.
+
+Şablonlarda {% url 'register' %} yazılarak dinamik link verilir.
+
+path('login/', ... name='login'):
+
+/login/ adresi views.login_user görünümünü tetikler. Kullanıcı adı ve şifre doğrulanır.
+
+@login_required ile kilitli bir sayfaya yetkisiz girildiğinde veya çıkış yapıldığında kullanıcı buraya yönlendirilir.
+
+path('logout/', ... name='logout'):
+
+/logout/ adresi oturumu sonlandırıp kullanıcıyı tekrar login ekranına atar
 
 
 """

@@ -131,3 +131,25 @@ MAILERS = {
         "BACKEND": "django.core.mail.backends.console.EmailBackend",
     },
 }
+
+
+# Kullanıcı oturumu açık değilse yönlendirilecek varsayılan giriş URL'i
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'ticket_list'
+LOGOUT_REDIRECT_URL = 'login'
+
+"""
+LOGIN_URL = 'login':
+
+Normalde: Django'da @login_required ile korunan bir sayfaya anonim biri girmeye çalıştığında sistem onu otomatik olarak varsayılan /accounts/login/ rotasına yönlendirir.
+
+Bizim Projemizde: Bizim giriş rotamız tickets/urls.py içinde name='login' (yani /login/) olarak tanımlandı. Bu ayar sayesinde Django 404 hatası vermek yerine kullanıcıyı doğrudan bizim hazırladığımız /login/ sayfasına postalar (Örn: /login/?next=/ticket/1/edit/).
+
+LOGIN_REDIRECT_URL = 'ticket_list':
+
+Kullanıcı giriş yaptıktan sonra hedef bir sayfa belirtilmemişse (?next=... parametresi yoksa) varsayılan olarak ana talep listesine (/) yönlendirilir.
+
+LOGOUT_REDIRECT_URL = 'login':
+
+Kullanıcı üst menüden "Çıkış Yap" butonuna bastığında oturumu kapatılır ve otomatik olarak tekrar giriş sayfasına (/login/) yönlendirilir.
+"""

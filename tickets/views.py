@@ -18,7 +18,151 @@ from django.db.models import Q  # Karmaşık arama sorguları (OR işlemleri) i�
 # from django.contrib.auth.models import User: Oturum açmamış test durumlarında kullanıcı atayabilmek için Django'nun kullanıcı modelini içeri aktarır.
 
 
+# Oturum Yönetimi ve Güvenlik İçin Gerekli İçe Aktarmalar
+from django.contrib.auth import login, logout, authenticate
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
 
+"""
+login, logout, authenticate:
+
+authenticate: Kullanıcı adı ve şifrenin veritabanındaki hash'lenmiş şifreyle eşleşip eşleşmediğini kontrol eder.
+
+login: Başarılı giriş sonrası kullanıcının tarayıcısına güvenli bir session (oturum) çerezi bırakır.
+
+logout: Kullanıcının aktif oturum çerezini siler ve oturumu kapatır.
+
+UserCreationForm, AuthenticationForm: Django'nun şifre kurallarını (en az 8 karakter, karmaşıklık vb.) ve güvenlik kontrollerini otomatik yapan hazır form sınıflarıdır.
+
+@login_required: Bir görünümün (View) başına konulduğunda, oturum açmamış kullanıcıların o sayfayı açmasını engelleyen bekçidir (decorator).
+
+messages: İşlem tamamlandığında (Örn: "Hesap oluşturuldu", "Yorum eklendi") ekrana bir kerelik Bootstrap alert kutusu basmamızı sağlayan mesaj çerçevesidir.
+"""
+
+
+# --- 1. KULLANICI OTURUM GÖRÜNÜMLERİ (AUTH VIEWS) ---
+
+def register_user(request):
+    """
+    Yeni kullanıcı kayıt görünümü.
+    Eğer kullanıcı zaten giriş yapmışsa direkt liste sayfasına yönlendirir.
+    """
+    if request.user.is_authenticated:
+        return redirect('ticket_list')
+    
+    #if request.user.is_authenticated: Zaten giriş yapmış olan bir kullanıcının tekrar kayıt sayfasına girmesini engeller ve ana listeye yönlendirir.
+
+
+    if request.method == 'POST':
+        form = UserCreationForm(request.POST)
+        #UserCreationForm(request.POST): Kullanıcının girdiği kullanıcı adı ve şifre ikilisini doğrular.
+        if form.is_valid():
+            user = form.save()
+            # user = form.save(): Yeni kullanıcıyı auth_user tablosuna şifresini hash'leyerek kaydeder.
+            login(request, user)
+            #login(request, user): Kayıt biter bitmez kullanıcıyı tekrar giriş formuyla uğraştırmadan otomatik olarak sisteme giriş yaptırır.
+            messages.success(request, f"Hoş geldiniz {user.username}! Hesabınız başarıyla oluşturuldu.")
+            #messages.success(...): Yeşil bir başarı mesajı hazırlar.
+            return redirect('ticket_list') #redirect: Kayıt işlemi bittikten sonra kullanıcıyı otomatik olarak bilet listesi sayfasına yönlendirir.
+        else:
+            messages.error(request, "Lütfen formdaki hataları düzeltin.")
+        #else: Eğer form geçerli değilse (Hata varsa)...
+    else:
+        form = UserCreationForm()
+    #else: Eğer POST isteği yoksa (Sayfa ilk açılıyorsa)...
+    context = {'form': form} #form: HTML şablonunda kullanmak üzere form nesnesini bir sözlüğe ekler.
+    return render(request, 'tickets/register.html', context) 
+
+
+
+def login_user(request):
+    """
+    Kullanıcı giriş görünümü.
+    """
+    if request.user.is_authenticated:
+        return redirect('ticket_list')
+    if request.method == 'POST':
+        form = AuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            username = form.cleaned_data.get('username') #cleaned_data: Formdan gelen verileri temizleyip sözlük formatında döndüren yapıdır.
+            password = form.cleaned_data.get('password') #password: Şifreyi güvenli bir şekilde alır.
+            user = authenticate(username=username, password=password)
+            if user is not None:
+                login(request, user)
+                messages.success(request, f"Tekrar hoş geldiniz, {username}!")
+                return redirect('ticket_list')
+            else:
+                messages.error(request, "Kullanıcı adı veya parola hatalı.")
+        else:
+            messages.error(request, "Geçersiz giriş bilgileri.")
+    else:
+        form = AuthenticationForm()
+    context = {'form': form}
+    return render(request, 'tickets/login.html', context)
+
+
+    #AuthenticationForm(request, data=request.POST): Giriş verilerini alan formdur.
+
+    #authenticate(...): Veritabanında bu kullanıcı adı ve parola doğru mu diye sorgular. Doğruysa User nesnesi döner, yanlışsa None döner.
+
+    #login(request, user): Oturumu başlatır.
+
+
+
+
+
+def logout_user(request):
+    """
+    Kullanıcı oturum kapatma görünümü.
+    """
+    logout(request)
+    messages.info(request, "Oturumunuz başarıyla kapatıldı.")
+    return redirect('login')
+
+#logout(request): Oturumu sıfırlar.
+
+#redirect('login'): Çıkış yapan kullanıcıyı tekrar giriş yapabileceği login sayfasına postalar.
+
+
+
+
+
+
+
+
+"""
+@login_required Yapısı Nasıl Çalışır?
+Anonim bir ziyaretçi /ticket/new/ veya /ticket/1/ sayfasına girmeye çalışırsa
+Django isteği keser ve kullanıcıyı otomatik olarak /accounts/login/?next=/ticket/new/ adresine yönlendirir. 
+Giriş yapmadan içerik gösterilmez.
+
+
+
+
+
+Artık @login_required sayesinde fonksiyon çalıştığı anda kullanıcının oturum açtığı kesinleştiği için:
+geçici else dalları (ticket.created_by = User.objects.first() # <-- GEÇİCİ KOD)
+tamamen kaldırıldı ve doğrudan request.user atandı.
+"""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- 2. DESTEK TALEBİ GÖRÜNÜMLERİ (KORUMALI) ---
+
+@login_required
 def ticket_list(request):
 
     # Django'da bir sayfa istendiğinde çalışacak fonksiyon tanımlanır.
@@ -126,6 +270,7 @@ def ticket_list(request):
 
 
 
+@login_required
 def ticket_detail(request, pk):
 
     """
@@ -209,17 +354,13 @@ def ticket_detail(request, pk):
 
 
 
-            # Yorumu yazan kullanıcıyı atayalım
-            if request.user.is_authenticated:
-                comment.author = request.user
-            else:
-                comment.author = User.objects.first()
-                
-            # Artık tam kaydı veritabanına yazalım
+            # Giriş yapmış olan oturum sahibini doğrudan yazar olarak atıyoruz
+            comment.author = request.user
             comment.save()
+            messages.success(request, "Yorumunuz başarıyla eklendi.")
 
 
-            #comment.author: Yorumu yazan kişiyi (author) oturum açmış kullanıcı olarak atar (oturum yoksa geliştirme ortamında ilk kullanıcıyı atar).
+            #comment.author: Yorumu yazan kişiyi (author) oturum açmış kullanıcı olarak atar.
 
             #comment.save(): Talebi, yazarı ve içeriği artık eksiksiz olan yorumu veritabanına fiziksel olarak kaydeder.
 
@@ -279,7 +420,7 @@ def ticket_detail(request, pk):
     ve tarayıcıya saf bir HTML sayfası olarak döndürür.
     """
 
-
+@login_required
 def ticket_create(request): 
     """
     Yeni destek talebi oluşturma görünümü (View).
@@ -314,19 +455,20 @@ def ticket_create(request):
             # ticket = form.save(commit=False): Formdaki verilerden bir Ticket nesnesi üretir ama henüz veritabanına kaydetmez, bellekte bekletir.
             
 
-            # Oluşturan kullanıcıyı atayalım:
-            if request.user.is_authenticated:
-                ticket.created_by = request.user
-                #Bir kullanıcı giriş yapmışsa (is_authenticated True), o kullanıcının bilgilerini alıp modeldeki created_by alanına atar.
-                # ticket.created_by = request.user: Eksik kalan "oluşturan kullanıcı" bilgisini arkadan sisteme giriş yapmış olan kullanıcı olarak atar.
-            else:
-                # Oturum açılmamışsa test kolaylığı için veritabanındaki ilk kullanıcıyı atayalım
-                ticket.created_by = User.objects.first()
-                
+
+            # Talebi oluşturan kişi oturum açmış olan kullanıcıdır
+            ticket.created_by = request.user
+
+            # ticket.created_by = request.user: Eksik kalan "oluşturan kullanıcı" bilgisini arkadan sisteme giriş yapmış olan kullanıcı olarak atar.
+            
             # Şimdi veritabanına tam kaydı gerçekleştirebiliriz
             ticket.save()
             #ticket.save(): Nesne artık eksiksiz olduğu için veritabanına nihai kaydı (INSERT INTO) gerçekleştirir.
             
+
+            messages.success(request, "Destek talebiniz başarıyla oluşturuldu.") 
+
+
             # İşlem bitince oluşturulan talebin detay sayfasına yönlendir
             return redirect('ticket_detail', pk=ticket.pk)
     else:
@@ -347,6 +489,7 @@ def ticket_create(request):
 
 
 
+@login_required
 def ticket_edit(request, pk): 
     # pk (Primary Key): Hangi talebin düzenleneceğini belirten kimlik numarasıdır (Örn: /ticket/3/edit/ için pk=3).
     #pk: Var olan bir kaydı (bu durumda bir talebi) veritabanından benzersiz kimlik numarasına (Primary Key) göre bulup getirmek için URL'den alınan değişkendir.
@@ -364,6 +507,7 @@ def ticket_edit(request, pk):
         form = TicketForm(request.POST, instance=ticket)
         if form.is_valid():
             form.save() # Var olan kaydı günceller (UPDATE sorgusu çalıştırır)
+            messages.success(request, "Destek talebi başarıyla güncellendi.")
             return redirect('ticket_detail', pk=ticket.pk)
 
             """
