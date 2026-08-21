@@ -174,18 +174,47 @@ def ticket_list(request):
     - Yöneticiler (is_staff) TÜM talepleri görür.
     - Normal kullanıcılar SADECE kendi açtıkları talepleri görür.
     """
+
+    # 1. Kullanıcının rolüne göre temel talep kümesini belirliyoruz
     if request.user.is_staff:
-        tickets = Ticket.objects.all()
+        base_tickets = Ticket.objects.all()
     else:
-        tickets = Ticket.objects.filter(created_by=request.user)
+        base_tickets = Ticket.objects.filter(created_by=request.user)
+
+
+    # base_tickets (Temel Veri Havuzu): Filtreleme yapılmadan önceki ham yetki havuzudur. 
+    # İstatistikler bu temel küme üzerinden hesaplanır; böylece kullanıcı arama kutusuna bir kelime yazıp tabloyu daraltsa bile üstteki toplam sayaçlar doğru genel toplamı göstermeye devam eder.
 
     #request.user.is_staff: Kullanıcının yönetici / teknik destek ekibinde olup olmadığını kontrol eder.
 
     #filter(created_by=request.user): Standart kullanıcıya ait olmayan talepleri daha SQL seviyesinde ayıklar (WHERE created_by_id = ?). 
     # Arama ve filtreler de sadece bu daraltılmış liste üzerinde çalışır.
     
+    # 2. İstatistik Sayaçları (Django ORM .count() Metodu)
+    total_count = base_tickets.count()
+    open_count = base_tickets.filter(status='open').count()
+    in_progress_count = base_tickets.filter(status='in_progress').count()
+    resolved_count = base_tickets.filter(status='resolved').count()
+    urgent_count = base_tickets.filter(priority='urgent').count()
     
-    # 2. URL'den gelen GET parametrelerini yakalıyoruz (Örn: /?q=yazici&status=open&priority=urgent)
+
+    #total_count = base_tickets.count(): Kullanıcının yetkisi dahilindeki toplam talep adedi.
+
+    #.filter(status='open').count(): Sadece durumu open (Açık) olanları sayar.
+
+    #.filter(status='in_progress').count(): Sadece durumu in_progress (Devam Ediyor) olanları sayar.
+
+    #.filter(status='resolved').count(): Sadece durumu resolved (Çözüldü) olanları sayar.
+
+    #.filter(priority='urgent').count(): Kritik ve anında müdahale gerektiren urgent (Acil) öncelikli talepleri sayar.
+    
+
+
+    # 3. URL Arama ve Filtreleme İşlemleri
+    tickets = base_tickets
+    #Bağımsız Filtreleme: Arama ve dropdown filtreleri tickets değişkeni üzerinden yürütülür, base_tickets sayaçları etkilenmez.
+    
+    # URL'den gelen GET parametrelerini yakalıyoruz (Örn: /?q=yazici&status=open&priority=urgent)
     search_query = request.GET.get('q', '')
     selected_status = request.GET.get('status', '')
     selected_priority = request.GET.get('priority', '')
@@ -195,7 +224,7 @@ def ticket_list(request):
     #Eğer parametre URL'de yoksa varsayılan olarak boş metin ('') döner, hata fırlatmaz.
 
 
-    # 3. Kelime Arama Filtresi (Başlıkta VEYA Açıklamada arar - icontains: büyük/küçük harf duyarsız arama)
+    # Kelime Arama Filtresi (Başlıkta VEYA Açıklamada arar - icontains: büyük/küçük harf duyarsız arama)
     if search_query:
         tickets = tickets.filter(
             Q(title__icontains=search_query) | Q(description__icontains=search_query)
@@ -212,7 +241,7 @@ def ticket_list(request):
 
 
 
-    # 4. Durum Filtresi
+    # Durum Filtresi
     if selected_status:
         tickets = tickets.filter(status=selected_status)
     
@@ -222,7 +251,7 @@ def ticket_list(request):
     #Örn: status=open ise -> WHERE status='open' sorgusu eklenir.
 
 
-    # 5. Öncelik Filtresi
+    # Öncelik Filtresi
     if selected_priority:
         tickets = tickets.filter(priority=selected_priority)
 
@@ -234,8 +263,8 @@ def ticket_list(request):
     
     
     
-    
-        # 6. HTML şablonuna hem filtrelenmiş verileri hem de seçili filtre durumlarını gönderiyoruz
+    # 4. Şablona hem talepleri hem de istatistik sayılarını gönderiyoruz
+    # HTML şablonuna hem filtrelenmiş verileri hem de seçili filtre durumlarını gönderiyoruz
     
     # HTML şablonuna göndereceğimiz verileri bir dictionary (sözlük) haline getiriyoruz
     context = {
@@ -245,6 +274,15 @@ def ticket_list(request):
         'selected_priority': selected_priority,
         'status_choices': Ticket.STATUS_CHOICES,
         'priority_choices': Ticket.PRIORITY_CHOICES,
+
+        # İstatistik Değişkenleri
+        #Hesaplanan 5 ayrı sayaç context sözlüğüne eklenerek HTML şablonuna gönderilir.
+        'total_count': total_count,
+        'open_count': open_count,
+        'in_progress_count': in_progress_count,
+        'resolved_count': resolved_count,
+        'urgent_count': urgent_count,
+
     }
     # Veritabanından çekilen veriyi HTML şablonuna aktarabilmek için bir Python dictionary (sözlük) yapısı oluşturulur.
     # Sözlükteki 'tickets' anahtarı, HTML tarafında bu verilere erişmek için kullanacağımız değişken adı olacaktır.

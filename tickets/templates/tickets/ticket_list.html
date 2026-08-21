@@ -4,10 +4,76 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2 class="h3 fw-bold text-gray-800 mb-0">Destek Talepleri</h2>
+    <h2 class="h3 fw-bold text-gray-800 mb-0">
+        {% if user.is_staff %}
+            <i class="bi bi-speedometer2 me-2"></i>Yönetici Destek Paneli
+        {% else %}
+            <i class="bi bi-card-checklist me-2"></i>Destek Taleplerim
+        {% endif %}
+    </h2>
     <a href="{% url 'ticket_create' %}" class="btn btn-success">
         <i class="bi bi-plus-circle me-1"></i> Yeni Talep Oluştur
     </a>
+</div>
+
+<!-- Canlı İstatistik Sayaç Kartları (Dashboard) -->
+<div class="row g-3 mb-4">
+    <!-- Toplam Talep -->
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 bg-primary text-white">
+            <div class="card-body d-flex align-items-center justify-content-between p-3">
+                <div>
+                    <span class="text-white-50 small fw-bold text-uppercase d-block">Toplam Talep</span>
+                    <h2 class="card-title fw-bold mb-0 mt-1">{{ total_count }}</h2>
+                </div>
+                <div class="fs-1 text-white-50">
+                    <i class="bi bi-ticket-detailed"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Açık Talepler -->
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 bg-warning text-dark">
+            <div class="card-body d-flex align-items-center justify-content-between p-3">
+                <div>
+                    <span class="text-dark-50 small fw-bold text-uppercase d-block">Açık Talepler</span>
+                    <h2 class="card-title fw-bold mb-0 mt-1">{{ open_count }}</h2>
+                </div>
+                <div class="fs-1 text-dark-50">
+                    <i class="bi bi-folder2-open"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Çözülen Talepler -->
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 bg-success text-white">
+            <div class="card-body d-flex align-items-center justify-content-between p-3">
+                <div>
+                    <span class="text-white-50 small fw-bold text-uppercase d-block">Çözülenler</span>
+                    <h2 class="card-title fw-bold mb-0 mt-1">{{ resolved_count }}</h2>
+                </div>
+                <div class="fs-1 text-white-50">
+                    <i class="bi bi-check-circle"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Acil Talepler -->
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 bg-danger text-white">
+            <div class="card-body d-flex align-items-center justify-content-between p-3">
+                <div>
+                    <span class="text-white-50 small fw-bold text-uppercase d-block">Acil Talepler</span>
+                    <h2 class="card-title fw-bold mb-0 mt-1">{{ urgent_count }}</h2>
+                </div>
+                <div class="fs-1 text-white-50">
+                    <i class="bi bi-exclamation-triangle"></i>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Arama ve Filtreleme Kartı -->
@@ -51,7 +117,6 @@
                     {% endfor %}
                 </select>
             </div>
-
 
             <!-- Butonlar -->
             <div class="col-md-2 d-flex align-items-end gap-2">
