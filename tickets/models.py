@@ -111,7 +111,18 @@ class Ticket(models.Model):
     # related_name='tickets': İlişki kurulduğunda kullanıcıya ait talep listesini döndürür.
     # verbose_name: Formlarda ve adminde "Oluşturan Kullanıcı" olarak görünür.
     
-   
+
+    # Talebe Atanan Yönetici (Boş bırakılabilir)
+    assigned_to = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='assigned_tickets', 
+        verbose_name="Atanan Yönetici"
+    )
+
+
     # Tarih Bilgileri
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Oluşturulma Tarihi")
     #Bu alan, talebin ilk kaydedildiği anı (saniye hassasiyetinde) otomatik olarak kaydeder.
@@ -133,6 +144,11 @@ class Ticket(models.Model):
         return f"#{self.id} - {self.title}"
         #Talep nesnesi gösterilirken " #1 - Ekran Kırıldı"  şeklinde ID ve başlık kombinasyonu döndürür.
 
+    @property
+    def ticket_number(self):
+        # ID'yi 5 haneli yapıp başına DES- koyar (Örn: DES-00005)
+        return f"DES-{self.id:05d}"
+
 
 class TicketComment(models.Model):
     #Taleplerin altına yazılan yorum ve cevapların tutulduğu tablo sınıfıdır.
@@ -153,6 +169,13 @@ class TicketComment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Tarih")
     #Yorumun oluşturulma tarihini tutar.
 
+    is_internal = models.BooleanField(default=False, verbose_name="İç Not (Sadece Yöneticiler Görsün)")
+    # Yöneticilere Özel İç Not: Bu alan işaretlendiğinde sadece yönetici kullanıcılar bu yorumu görebilir.
+    # Kullanıcılar kendi taleplerine baktıklarında bu yorumu göremezler.
+    # Varsayılan değeri False olduğu için, normal yorumlar tüm kullanıcılar tarafından görülür.
+    # Eğer bir yönetici iç konuşma (örneğin teknik analiz, not alma) yapmak isterse bu alanı True yapabilir.
+
+    
     class Meta:
         #Yorumlara ait genel ayarlar
         verbose_name = "Yorum"

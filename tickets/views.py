@@ -1,6 +1,6 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from .models import Ticket
-from .forms import TicketForm,CommentForm # CommentForm sınıfını detay görünümünde kullanabilmek için içeri aktarır.
+from .forms import TicketForm,CommentForm, UserRegisterForm # CommentForm sınıfını detay görünümünde kullanabilmek için içeri aktarır.
 from django.contrib.auth.models import User
 from django.db.models import Q  # Karmaşık arama sorguları (OR işlemleri) için Q nesnesini içeri aktarıyoruz
 #Q Nesnesi: Normalde Django ORM'de .filter(title=..., description=...) yazıldığında araya AND (VE) koyar. SQL'deki OR (VEYA) mantığını kurabilmek için Q nesnesini içeri aktarırız.
@@ -55,8 +55,8 @@ def register_user(request):
 
 
     if request.method == 'POST':
-        form = UserCreationForm(request.POST)
-        #UserCreationForm(request.POST): Kullanıcının girdiği kullanıcı adı ve şifre ikilisini doğrular.
+        form = UserRegisterForm(request.POST)
+        # Kullanıcının girdiği kullanıcı adı ve şifre ikilisini doğrular.
         if form.is_valid():
             user = form.save()
             # user = form.save(): Yeni kullanıcıyı auth_user tablosuna şifresini hash'leyerek kaydeder.
@@ -69,7 +69,7 @@ def register_user(request):
             messages.error(request, "Lütfen formdaki hataları düzeltin.")
         #else: Eğer form geçerli değilse (Hata varsa)...
     else:
-        form = UserCreationForm()
+        form = UserRegisterForm()
     #else: Eğer POST isteği yoksa (Sayfa ilk açılıyorsa)...
     context = {'form': form} #form: HTML şablonunda kullanmak üzere form nesnesini bir sözlüğe ekler.
     return render(request, 'tickets/register.html', context) 
@@ -175,11 +175,11 @@ def ticket_list(request):
     - Normal kullanıcılar SADECE kendi açtıkları talepleri görür.
     """
 
-    # 1. Kullanıcının rolüne göre temel talep kümesini belirliyoruz
+    # 1. Kullanıcının rolüne göre temel talep kümesini belirliyoruz (Performans için select_related eklendi)
     if request.user.is_staff:
-        base_tickets = Ticket.objects.all()
+         base_tickets = Ticket.objects.all().select_related('created_by', 'category', 'assigned_to')
     else:
-        base_tickets = Ticket.objects.filter(created_by=request.user)
+        base_tickets = Ticket.objects.filter(created_by=request.user).select_related('created_by', 'category', 'assigned_to')
 
 
     # base_tickets (Temel Veri Havuzu): Filtreleme yapılmadan önceki ham yetki havuzudur. 
@@ -325,7 +325,8 @@ def ticket_detail(request, pk):
    
     # 1. get_object_or_404: Veritabanında belirtilen pk (primary key / id) değerine sahip Ticket'ı arar.
     # Bulursa 'ticket' değişkenine atar, bulamazsa kullanıcıya 404 hatası döner.
-    ticket = get_object_or_404(Ticket, pk=pk)
+    # 1. get_object_or_404: İlişkili verileri tek sorguda çek
+    ticket = get_object_or_404(Ticket.objects.select_related('created_by', 'category', 'assigned_to'), pk=pk)
 
     """
     Ticket: Arama yapılacak model/tablo.
@@ -349,7 +350,17 @@ def ticket_detail(request, pk):
         #IDOR Güvenlik Duvarı: Kullanıcı ne yöneticiyse ne de o talebin bizzat sahibiyse, işlem hemen kesilir; 
         #kırmızı bir hata mesajıyla ana sayfaya postalanır.
 
-    comments = ticket.comments.all()
+
+
+    # YÖNETİCİ KONTROLÜ: Normal kullanıcılar is_internal=True olan yorumları göremez!
+    # 2. Yorumları çekerken yazar (author) bilgisini önceden yükle
+    if request.user.is_staff:
+        comments = ticket.comments.all().select_related('author')
+    else:
+        comments = ticket.comments.filter(is_internal=False).select_related('author')
+
+
+  
 
 
     
@@ -365,7 +376,8 @@ def ticket_detail(request, pk):
     
     if request.method == 'POST':
         # Yorum gönderme butonu tıklandıysa (POST isteği)
-        comment_form = CommentForm(request.POST)
+        comment_form = CommentForm(request.POST, user=request.user)
+
         if comment_form.is_valid():
 
             #if request.method == 'POST': Kullanıcı detay sayfasındaki "Yorum Yap / Gönder" butonuna bastığında çalışır.
@@ -424,7 +436,7 @@ def ticket_detail(request, pk):
 
     else:
         # Sayfa ilk kez açıldıysa (GET isteği) boş yorum formu üret
-        comment_form = CommentForm()
+        comment_form = CommentForm(user=request.user)
 
 
 
@@ -476,7 +488,7 @@ def ticket_create(request):
     if request.method == 'POST':
         #Kullanıcı formu doldurup Gönder butonuna bastıysa (POST isteği)
         # Kullanıcı formu ilk kez açtığında içi boş, temiz bir form nesnesi üretir ve ticket_form.html şablonuna gönderir.
-        form = TicketForm(request.POST)
+        form = TicketForm(request.POST, user=request.user) # user=request.user eklendi
         # Bir form HTML sayfasıdır. Kullanıcı bu formu doldurup "Gönder" (Submit) butonuna tıkladığında, tarayıcı sayfanın URL'ine bir POST isteği gönderir.
         # Kullanıcının girdiği verileri (request.POST) alıp forma yükler.
 
@@ -514,7 +526,7 @@ def ticket_create(request):
             return redirect('ticket_detail', pk=ticket.pk)
     else:
         # Sayfaya ilk kez girildiyse (GET isteği) boş form üret
-        form = TicketForm()
+        form = TicketForm(user=request.user)
         # form = TicketForm(): Tarayıcıdan henüz POST isteği gelmediği için (sayfa ilk açılış anı), içi boş temiz bir TicketForm nesnesi oluşturulur.
 
     context = {
@@ -544,17 +556,57 @@ def ticket_edit(request, pk):
     #Güvenli Nesne Çekme: Düzenlenmek istenen talep veritabanında mevcutsa ticket değişkenine atar; mevcut değilse sunucuyu çökertmeden 404 Not Found döner.
 
    
-    # Güvenlik Kontrolü
+    # Güvenlik Kontrolü 1: Yetkisiz kullanıcı engeli
     if not request.user.is_staff and ticket.created_by != request.user:
         messages.error(request, "Bu destek talebini düzenleme yetkiniz yok!")
         return redirect('ticket_list')
 
- 
+
+    # Güvenlik Kontrolü 2: Normal kullanıcı çözülmüş/kapatılmış talebi düzenleyemesin
+    if not request.user.is_staff and ticket.status in ['resolved', 'closed']:
+        messages.error(request, "Çözülmüş veya kapatılmış destek talepleri düzenlenemez!")
+        return redirect('ticket_detail', pk=ticket.pk)
+
+
     if request.method == 'POST':
         # POST İsteği: Formdaki yeni verileri var olan 'ticket' nesnesinin üzerine yaz (instance=ticket)
-        form = TicketForm(request.POST, instance=ticket)
+        
+        # Eski değerleri karşılaştırmak için hafızaya alıyoruz
+        old_status = ticket.get_status_display()
+        old_assigned = ticket.assigned_to.username if ticket.assigned_to else "Atanmadı"
+        
+        
+        
+        
+        form = TicketForm(request.POST, instance=ticket, user=request.user) # user=request.user eklendi
         if form.is_valid():
-            form.save() # Var olan kaydı günceller (UPDATE sorgusu çalıştırır)
+            
+            updated_ticket = form.save()
+            
+            # Değişiklikleri tespit edelim
+            changes = []
+            new_status = updated_ticket.get_status_display()
+            new_assigned = updated_ticket.assigned_to.username if updated_ticket.assigned_to else "Atanmadı"
+            if old_status != new_status:
+                changes.append(f"Durum: '{old_status}' ➔ '{new_status}'")
+            
+            if old_assigned != new_assigned:
+                changes.append(f"Atanan Yönetici: '{old_assigned}' ➔ '{new_assigned}'")
+            # Eğer bir değişiklik yapıldıysa otomatik sistem yorumu düşelim
+            if changes:
+                log_content = "⚙️ Güncelleme yapıldı: " + ", ".join(changes)
+            else:
+                log_content = "⚙️ Talep detayları güncellendi."
+            # Sistem Yorumunu Kaydet
+            from .models import TicketComment
+            TicketComment.objects.create(
+                ticket=updated_ticket,
+                author=request.user,
+                content=log_content,
+                is_internal=False # Herkesin görebileceği açık sistem logu
+            )
+           
+           
             messages.success(request, "Destek talebi başarıyla güncellendi.")
             return redirect('ticket_detail', pk=ticket.pk)
 
@@ -569,7 +621,7 @@ def ticket_edit(request, pk):
 
     else:
         # GET İsteği: Formu var olan talebin mevcut verileriyle dolu olarak aç (instance=ticket)
-        form = TicketForm(instance=ticket)
+        form = TicketForm(instance=ticket, user=request.user) # user=request.user eklendi
         # Formu Dolu Açma (GET): Kullanıcı sayfaya ilk girdiğinde, form kutularının içine mevcut talep verilerini (başlık, mevcut durum, kategori vb.) otomatik olarak doldurur.
 
     context = {
@@ -591,17 +643,21 @@ def ticket_delete(request, pk):
     GET isteğinde onay sayfasını gösterir, POST isteğinde talebi kalıcı olarak siler.
     """
     ticket = get_object_or_404(Ticket, pk=pk)
-    # Güvenlik Kontrolü
-    if not request.user.is_staff and ticket.created_by != request.user:
-        messages.error(request, "Bu destek talebini silme yetkiniz yok!")
+
+    # Güvenlik Kontrolü: Sadece yöneticiler talep silebilir
+    if not request.user.is_staff:
+        messages.error(request, "Destek taleplerini yalnızca yöneticiler silebilir!")
         return redirect('ticket_list')
     if request.method == 'POST':
         ticket_title = ticket.title
-        ticket.delete() # Veritabanından kalıcı olarak siler
+        ticket.delete() # veritabanından tamamen siler.
         messages.success(request, f"'{ticket_title}' başlıklı talep başarıyla silindi.")
         return redirect('ticket_list')
+        
     context = {'ticket': ticket}
     return render(request, 'tickets/ticket_confirm_delete.html', context)
+
+ 
 
 
 

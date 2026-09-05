@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 
-{% block title %}#{{ ticket.id }} - {{ ticket.title }} - Destek Sistemi{% endblock %}
+{% block title %}{{ ticket.ticket_number }} - {{ ticket.title }} - Destek Sistemi{% endblock %}
+
 
 {% block content %}
 <div class="mb-3 d-flex justify-content-between align-items-center">
@@ -28,7 +29,7 @@
     <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
         <div>
             <!-- Talep ID ve Başlığı -->
-            <span class="badge bg-dark me-2">#{{ ticket.id }}</span>
+            <span class="badge bg-dark me-2">{{ ticket.ticket_number }}</span>
             <h1 class="h4 d-inline fw-bold text-gray-800">{{ ticket.title }}</h1>
         </div>
         <div>
@@ -57,31 +58,41 @@
     </div>
 
     <div class="card-body">
-        <!-- Talebin Üst Bilgileri (Kullanıcı, Kategori, Tarih) -->
+
+                <!-- Talebin Üst Bilgileri (Kullanıcı, Atanan Yönetici, Kategori, Oluşturulma & Güncellenme Tarihi) -->
         <div class="row text-muted border-bottom pb-3 mb-3 small">
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <i class="bi bi-person me-1"></i><strong>Oluşturan:</strong> {{ ticket.created_by.username }}
             </div>
-            <div class="col-md-4">
-                <i class="bi bi-folder me-1"></i><strong>Kategori:</strong>
-                {% if ticket.category %}
-                {{ ticket.category.name }}
+            <div class="col-md-3">
+                <i class="bi bi-person-badge me-1"></i><strong>Atanan Yönetici:</strong> 
+                {% if ticket.assigned_to %}
+                    <span class="badge bg-info text-dark">{{ ticket.assigned_to.username }}</span>
                 {% else %}
-                Kategorisiz
+                    <span class="badge bg-light text-muted">Atanmadı</span>
                 {% endif %}
             </div>
-            <div class="col-md-4">
-                <i class="bi bi-clock me-1"></i><strong>Tarih:</strong> {{ ticket.created_at|date:"d.m.Y H:i" }}
+            <div class="col-md-2">
+                <i class="bi bi-folder me-1"></i><strong>Kategori:</strong>
+                {% if ticket.category %}{{ ticket.category.name }}{% else %}Kategorisiz{% endif %}
+            </div>
+            <div class="col-md-2">
+                <i class="bi bi-clock me-1"></i><strong>Oluşturulma:</strong> {{ ticket.created_at|date:"d.m.Y H:i" }}
+            </div>
+            <div class="col-md-2">
+                <i class="bi bi-arrow-repeat me-1"></i><strong>Son Güncelleme:</strong> {{ ticket.updated_at|date:"d.m.Y H:i" }}
             </div>
         </div>
 
-        <!-- Talebin Açıklaması -->
+                <!-- Talebin Açıklaması -->
         <div class="ticket-description">
             <h5 class="fw-bold text-secondary mb-2">Talep Açıklaması:</h5>
             <p class="card-text fs-6 lead text-dark">{{ ticket.description|linebreaks }}</p>
         </div>
     </div>
 </div>
+
+
 
 <!-- Yorumlar Geçmişi Kartı -->
 <div class="card shadow-sm mb-4">
@@ -92,17 +103,22 @@
     </div>
 
     <div class="card-body">
+
         {% for comment in comments %}
-        <div class="border-bottom pb-3 mb-3">
+        <div class="border-bottom pb-3 mb-3 {% if comment.is_internal %}bg-warning-subtle p-3 rounded border-warning{% endif %}">
             <div class="d-flex justify-content-between align-items-center mb-1">
                 <strong>
                     <i class="bi bi-person-circle me-1"></i>{{ comment.author.username }}
+                    {% if comment.is_internal %}
+                    <span class="badge bg-warning text-dark ms-2"><i class="bi bi-lock-fill me-1"></i>Gizli İç Not</span>
+                    {% endif %}
                 </strong>
                 <small class="text-muted">{{ comment.created_at|date:"d.m.Y H:i" }}</small>
             </div>
             <p class="mb-0 text-dark">{{ comment.content|linebreaks }}</p>
         </div>
         {% empty %}
+
         <div class="text-center py-3 text-muted">
             <i class="bi bi-chat-square-dots display-6 d-block mb-2"></i>
             Bu talebe henüz hiç yorum yapılmamış. İlk yorumu aşağıdan ekleyebilirsiniz.
@@ -130,6 +146,17 @@
                 <div class="text-danger small mt-1">{{ comment_form.content.errors }}</div>
                 {% endif %}
             </div>
+
+            <!-- GİZLİ İÇ NOT ONAY KUTUSU (SADECE YÖNETİCİLER GÖRÜR) -->
+            {% if 'is_internal' in comment_form.fields %}
+            <div class="form-check mb-3">
+                {{ comment_form.is_internal }}
+                <label for="{{ comment_form.is_internal.id_for_label }}" class="form-check-label text-warning-emphasis fw-bold ms-1">
+                    <i class="bi bi-lock-fill me-1"></i>{{ comment_form.is_internal.label }}
+                </label>
+            </div>
+            {% endif %}
+
             <div class="d-flex justify-content-end">
                 <button type="submit" class="btn btn-primary px-4">
                     <i class="bi bi-send me-1"></i> Yorumu Gönder
@@ -138,4 +165,6 @@
         </form>
     </div>
 </div>
+
+
 {% endblock %}

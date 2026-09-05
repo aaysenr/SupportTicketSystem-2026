@@ -145,6 +145,7 @@
                         <th>Kategori</th>
                         <th>Öncelik</th>
                         <th>Durum</th>
+                        <th>Atanan</th> <!-- EKLENDİ -->
                         <th>Oluşturan</th>
                         <th>Tarih</th>
                     </tr>
@@ -152,7 +153,7 @@
                 <tbody>
                     {% for ticket in tickets %}
                     <tr>
-                        <td><strong>#{{ ticket.id }}</strong></td>
+                        <td><strong class="text-primary">{{ ticket.ticket_number }}</strong></td>
                         <td>
                             <a href="{% url 'ticket_detail' ticket.id %}"
                                 class="text-decoration-none fw-bold text-dark">
@@ -187,6 +188,13 @@
                             {% else %}
                             <span class="badge bg-secondary">Kapalı</span>
                             {% endif %}
+                        </td>
+                        <td>
+                            {% if ticket.assigned_to %}
+                            <span class="badge bg-info text-dark" title="{{ ticket.assigned_to.username }}">{{ ticket.assigned_to.username|truncatechars:10 }}</span>
+                            {% else %}
+                            <span class="badge bg-light text-muted">Henüz Atanmadı</span>
+                            {% endif %}                            
                         </td>
                         <td>{{ ticket.created_by.username }}</td>
                         <td>{{ ticket.created_at|date:"d.m.Y H:i" }}</td>

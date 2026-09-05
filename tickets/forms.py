@@ -1,15 +1,37 @@
 from django import forms # from django import forms: Django'nun form oluşturma, doğrulama ve widget yönetim modülünü içeri aktarır
+from django.contrib.auth.models import User 
 from .models import Ticket, TicketComment # Formun hangi veritabanı tablosunu temel alacağını belirtmek için Ticket ve TicketComment modelini içe aktarır.
+from django.contrib.auth.forms import UserCreationForm 
 
 class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından türeyen bir form sınıfı tanımlar. Bu sayede Ticket modelindeki alanları otomatik olarak bir web formuna dönüştürür.
     """
     Ticket modeline dayalı form sınıfı.
     Kullanıcıdan alınacak alanları ve HTML stil (Bootstrap) giydirmelerini yönetir.
     """
+
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Eğer kullanıcı yönetici değilse status ve assigned_to alanlarını kaldır
+        if user and not user.is_staff:
+            if 'status' in self.fields:
+                del self.fields['status']
+            if 'assigned_to' in self.fields:
+                del self.fields['assigned_to']
+        else:
+            # Yöneticiler için 'assigned_to' liste seçeneklerinde sadece Yetkilileri (is_staff=True) göster
+            if 'assigned_to' in self.fields:
+                self.fields['assigned_to'].queryset = User.objects.filter(is_staff=True)
+                self.fields['assigned_to'].empty_label = "Henüz Atanmadı (Atama Yap)"
+
+ 
+   
+    
     class Meta: # Django'ya bu formun hangi modeli kullanacağını ve hangi alanları göstereceğini bildirir
         model = Ticket # Formun Ticket veritabanı tablosundan türetileceğini belirtir.
         # Formda kullanıcının doldurmasını istediğimiz alanlar:
-        fields = ['title', 'category', 'priority', 'status','description']
+        fields = ['title', 'category', 'priority', 'status','assigned_to','description']
 
         # Form alanlarının HTML görünümünü ve davranışlarını (placeholder, class, rows vb.) tanımlar.
         # ModelForm içindeki Meta sınıfında tanımlanan bu bölüm,
@@ -46,6 +68,9 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
             'status': forms.Select(attrs={
                 'class': 'form-select'
             }),
+            'assigned_to': forms.Select(attrs={
+                'class': 'form-select'
+            }), # EKLENDİ
             'description': forms.Textarea(attrs={
                 'class': 'form-control',
                 'rows': 5,
@@ -77,6 +102,7 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
             'category': 'Kategori',
             'priority': 'Öncelik Seviyesi',
             'status': 'Talep Durumu',
+            'assigned_to': 'Atanan Yönetici', # EKLENDİ
             'description': 'Detaylı Açıklama',
         }
 
@@ -90,9 +116,19 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
     """
     TicketComment modeline dayalı yorum ekleme formu.
     """
+
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Eğer kullanıcı yönetici değilse "İç Not" onay kutusunu gizle
+        if user and not user.is_staff:
+            if 'is_internal' in self.fields:
+                del self.fields['is_internal']
+
+
     class Meta:
         model = TicketComment # Formun bağlanacağı veritabanı tablosunu seçer.
-        fields = ['content'] # Formda gösterilecek alanlar.
+        fields = ['content','is_internal'] # Formda gösterilecek alanlar.
 
         #model = TicketComment: Formun veritabanındaki TicketComment tablosuyla eşleşeceğini belirtir.
 
@@ -104,6 +140,9 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
                 'class': 'form-control',
                 'rows': 3,
                 'placeholder': 'Yanıtınızı veya güncellemenizi buraya yazınız...'
+            }),
+            'is_internal': forms.CheckboxInput(attrs={
+                'class': 'form-check-input',
             }),
         }
         
@@ -123,6 +162,32 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
 
         labels = {
             'content': 'Yorum / Cevap Yazın',
+            'is_internal': 'Bu bir gizli İç Nottur (Sadece Yöneticiler Görebilir)',
         }
 
         #labels: Kutunun hemen üstünde HTML <label> olarak görünecek başlığı Türkçeleştirir.
+
+
+class UserRegisterForm(UserCreationForm):
+    """
+    Gelişmiş Kayıt Formu:
+    - E-posta adresini zorunlu hale getirir.
+    - Tüm form elemanlarına Bootstrap 'form-control' stilini giydirir.
+    """
+    email = forms.EmailField(
+        required=True,
+        label="E-posta Adresi",
+        widget=forms.EmailInput(attrs={
+            'placeholder': 'ornek@email.com'
+        })
+    )
+
+    class Meta(UserCreationForm.Meta):
+        model = User
+        fields = ['username', 'email']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Tüm alanlara (Kullanıcı adı, e-posta, parola, parola tekrar) Bootstrap stili verelim
+        for field_name, field in self.fields.items():
+            field.widget.attrs['class'] = 'form-control'
