@@ -11,7 +11,8 @@ from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, Pass
 from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm 
 from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog
 from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog, Notification
-
+from django.http import JsonResponse
+from .models import ChatGroup, ChatMessage
 
 # render: Django'nun HTML şablonlarını (template) verilerle birleştirip kullanıcıya sunmasını sağlayan pratik bir yardımcı fonksiyondur.
 # from .models import Ticket: Bulunduğumuz uygulama klasöründeki (.) models.py dosyasından veritabanı tablomuzu temsil eden Ticket modelini projeye dahil eder.
@@ -944,3 +945,168 @@ def mark_notification_as_read(request, pk):
     return redirect('notifications_list')
 
    
+
+@login_required
+def team_chat_view(request, chat_type='group', chat_id=None):
+    """
+    Yöneticiler için Ekip Sohbeti, Özel Gruplar ve DM Arayüzü.
+    """
+    # 🔒 Güvenlik Kontrolü: Yalnızca yöneticiler erişebilir!
+    if not request.user.is_staff:
+        messages.error(request, "Ekip sohbetine yalnızca yetkili yöneticiler erişebilir!")
+        return redirect('ticket_list')
+
+    # 1. Varsayılan "Genel Ekip Odası" yoksa otomatik oluştur
+    general_group, _ = ChatGroup.objects.get_or_create(
+        is_general=True,
+        defaults={'name': 'Genel Ekip Odası', 'created_by': request.user}
+    )
+    if request.user not in general_group.members.all():
+        general_group.members.add(request.user)
+
+    # 2. Tüm Yöneticileri ve Üzerlerindeki Aktif Bilet Sayısını Çek
+    managers = User.objects.filter(is_staff=True).annotate(
+        active_tickets_count=Count(
+            'assigned_tickets',
+            filter=Q(assigned_tickets__status__in=['open', 'in_progress'])
+        )
+    )
+
+    # 3. Giriş yapan yöneticinin dahil olduğu Özel Gruplar
+    user_groups = ChatGroup.objects.filter(members=request.user, is_general=False)
+
+    # 4. Aktif Sohbet Kanalını Belirle
+    active_channel = {
+        'type': chat_type,
+        'id': chat_id,
+        'title': 'Genel Ekip Odası',
+        'target_user': None,
+        'group': general_group
+    }
+
+    messages_list = []
+
+    if chat_type == 'dm' and chat_id:
+        recipient = get_object_or_404(User, id=chat_id, is_staff=True)
+        active_channel['title'] = f"💬 {recipient.get_full_name() or recipient.username}"
+        active_channel['target_user'] = recipient
+        # İki kullanıcı arasındaki özel mesajlar (DM)
+        messages_list = ChatMessage.objects.filter(
+            Q(sender=request.user, recipient=recipient) |
+            Q(sender=recipient, recipient=request.user)
+        ).order_by('created_at')
+
+    elif chat_type == 'group' and chat_id:
+        group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
+        active_channel['title'] = f"👥 {group.name}"
+        active_channel['group'] = group
+        messages_list = group.messages.all().order_by('created_at')
+
+    else:
+        # Varsayılan: Genel Ekip Odası
+        active_channel['type'] = 'group'
+        active_channel['id'] = general_group.id
+        messages_list = general_group.messages.all().order_by('created_at')
+
+    context = {
+        'managers': managers,
+        'general_group': general_group,
+        'user_groups': user_groups,
+        'active_channel': active_channel,
+        'chat_messages': messages_list,
+    }
+
+    return render(request, 'tickets/team_chat.html', context)
+
+
+@login_required
+def send_chat_message_view(request):
+    """
+    Sohbet Mesajı Gönderme Endpoint'i (AJAX & Form Uyumlu)
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Yetkisiz erişim'}, status=403)
+
+    if request.method == 'POST':
+        chat_type = request.POST.get('chat_type')
+        chat_id = request.POST.get('chat_id')
+        content = request.POST.get('content', '').strip()
+
+        if not content:
+            return JsonResponse({'status': 'error', 'message': 'Mesaj boş olamaz'}, status=400)
+
+        msg = None
+        if chat_type == 'dm':
+            recipient = get_object_or_404(User, id=chat_id, is_staff=True)
+            msg = ChatMessage.objects.create(sender=request.user, recipient=recipient, content=content)
+        else:
+            group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
+            msg = ChatMessage.objects.create(sender=request.user, group=group, content=content)
+
+        return JsonResponse({
+            'status': 'success',
+            'sender_id': msg.sender.id,
+            'sender_name': msg.sender.get_full_name() or msg.sender.username,
+            'content': msg.content,
+            'created_at': msg.created_at.strftime('%H:%M')
+        })
+
+    return JsonResponse({'status': 'error', 'message': 'Geçersiz istek'}, status=400)
+
+
+@login_required
+def create_chat_group_view(request):
+    """
+    Yeni Özel Sohbet Grubu Oluşturma
+    """
+    if not request.user.is_staff:
+        messages.error(request, "Yetkiniz yok!")
+        return redirect('ticket_list')
+
+    if request.method == 'POST':
+        group_name = request.POST.get('group_name', '').strip()
+        member_ids = request.POST.getlist('members')
+
+        if group_name:
+            group = ChatGroup.objects.create(name=group_name, created_by=request.user)
+            # Kurucuyu gruba ekle
+            group.members.add(request.user)
+            # Seçilen diğer yöneticileri ekle
+            if member_ids:
+                selected_members = User.objects.filter(id__in=member_ids, is_staff=True)
+                group.members.add(*selected_members)
+
+            messages.success(request, f"'{group_name}' sohbet grubu oluşturuldu.")
+            return redirect('team_chat_detail', chat_type='group', chat_id=group.id)
+
+    return redirect('team_chat')
+
+
+@login_required
+def get_chat_messages_api(request, chat_type, chat_id):
+    """
+    Canlı Sohbet Yenileme İçin Mesajları JSON Dönen API
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'messages': []}, status=403)
+
+    if chat_type == 'dm':
+        recipient = get_object_or_404(User, id=chat_id, is_staff=True)
+        messages_qs = ChatMessage.objects.filter(
+            Q(sender=request.user, recipient=recipient) |
+            Q(sender=recipient, recipient=request.user)
+        ).order_by('created_at')
+    else:
+        group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
+        messages_qs = group.messages.all().order_by('created_at')
+
+    data = []
+    for m in messages_qs:
+        data.append({
+            'sender_id': m.sender.id,
+            'sender_name': m.sender.get_full_name() or m.sender.username,
+            'content': m.content,
+            'created_at': m.created_at.strftime('%H:%M')
+        })
+
+    return JsonResponse({'messages': data})

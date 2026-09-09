@@ -25,6 +25,17 @@ urlpatterns = [
 
 
 
+    # Ekip Sohbeti (Team Chat) İşlemleri
+    path('team-chat/', views.team_chat_view, name='team_chat'),
+    path('team-chat/<str:chat_type>/<int:chat_id>/', views.team_chat_view, name='team_chat_detail'),
+    path('team-chat/send/', views.send_chat_message_view, name='send_chat_message'),
+    path('team-chat/create-group/', views.create_chat_group_view, name='create_chat_group'),
+    path('team-chat/api/messages/<str:chat_type>/<int:chat_id>/', views.get_chat_messages_api, name='get_chat_messages_api'),
+
+
+
+
+
 ]
 
 
