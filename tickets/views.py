@@ -522,6 +522,17 @@ def ticket_detail(request, pk):
             # Giriş yapmış olan oturum sahibini doğrudan yazar olarak atıyoruz
             comment.author = request.user
             comment.save()
+
+
+            # E-POSTA BİLDİRİMİ: Yorumu yazan kişi talep sahibi değilse (Yönetici ise) talep sahibine mail at
+            if comment.author != ticket.created_by and ticket.created_by.email:
+                send_notification_email(
+                    subject=f"[Destek Talebi] #{ticket.ticket_number} Talebinize Yeni Yanıt Geldi",
+                    message=f"Merhaba {ticket.created_by.username},\n\n#{ticket.ticket_number} numaralı '{ticket.title}' başlıklı destek talebinize {comment.author.username} tarafından yeni bir yanıt eklendi:\n\n\"{comment.content}\"\n\nTalebi ve detayları görüntülemek için sisteme giriş yapabilirsiniz.\n\nİyi çalışmalar dileriz.",
+                    recipient_list=[ticket.created_by.email]
+                )
+
+  
             messages.success(request, "Yorumunuz başarıyla eklendi.")
 
 
@@ -634,6 +645,15 @@ def ticket_create(request):
             #ticket.save(): Nesne artık eksiksiz olduğu için veritabanına nihai kaydı (INSERT INTO) gerçekleştirir.
             
 
+
+        # E-POSTA BİLDİRİMİ: Kullanıcıya Teyit Maili Gönder
+        if ticket.created_by.email:
+            send_notification_email(
+                subject=f"[Destek Talebi] #{ticket.ticket_number} Talebiniz Başarıyla Alındı",
+                message=f"Merhaba {ticket.created_by.username},\n\n#{ticket.ticket_number} numaralı '{ticket.title}' başlıklı destek talebiniz sisteme kaydolmuştur.\n\nDestek ekibimiz en kısa sürede talebinizi inceleyip yanıtlayacaktır.\n\nİyi günler dileriz.",
+                recipient_list=[ticket.created_by.email]
+            )
+
             messages.success(request, "Destek talebiniz başarıyla oluşturuldu.") 
 
 
@@ -711,22 +731,35 @@ def ticket_edit(request, pk):
             
             updated_ticket = form.save()
             # ticket = form.save(commit=False): Formdaki verilerden bir Ticket nesnesi üretir ama henüz veritabanına kaydetmez, bellekte bekletir.
+        
             
-            # Değişiklikleri tespit edelim
-            changes = [] # Değişiklikler listesi
+            # Değişiklikleri ve yeni durumları tespit edelim (new_status önceden tanımlanıyor)
+            changes = []
             new_status = updated_ticket.get_status_display() # Formdan gelen güncel durumu al
             new_assigned = updated_ticket.assigned_to.username if updated_ticket.assigned_to else "Atanmadı" # Formdan gelen güncel atanan kullanıcıyı al
+
+            # E-POSTA BİLDİRİMİ: Eğer durum değişmişse talep sahibine mail gönder
+            if old_status != new_status and updated_ticket.created_by.email:
+                send_notification_email(
+                    subject=f"[Destek Talebi] #{updated_ticket.ticket_number} Durumu Güncellendi: {new_status}",
+                    message=f"Merhaba {updated_ticket.created_by.username},\n\n#{updated_ticket.ticket_number} numaralı '{updated_ticket.title}' başlıklı talebinizin durumu '{old_status}' konumundan '{new_status}' konumuna güncellenmiştir.\n\nDetayları görüntülemek için sisteme giriş yapabilirsiniz.",
+                    recipient_list=[updated_ticket.created_by.email]
+                )
+
             if old_status != new_status:
-                changes.append(f"Durum: '{old_status}' ➔ '{new_status}'")  # Eğer durum değişmişse listeye ekle
+                changes.append(f"Durum: '{old_status}' ➔ '{new_status}'") # Eğer durum değişmişse listeye ekle
             
             if old_assigned != new_assigned:
                 changes.append(f"Atanan Yönetici: '{old_assigned}' ➔ '{new_assigned}'") # Eğer atanan kullanıcı değişmişse listeye ekle
+
             # Eğer bir değişiklik yapıldıysa otomatik sistem yorumu düşelim
             if changes:
                 log_content = "Güncelleme yapıldı: " + ", ".join(changes)
             else:
                 log_content = "Talep detayları güncellendi."
-            
+
+
+
             # Sistem Yorumunu Kaydet
             from .models import TicketComment
             TicketComment.objects.create(
@@ -843,6 +876,41 @@ def change_password_view(request):
         form = PasswordChangeForm(request.user)
     
     return render(request, 'tickets/change_password.html', {'form': form})
+
+
+
+def send_notification_email(subject, message, recipient_list):
+    """
+    Güvenli E-posta Bildirim Gönderici Yardımcı Fonksiyonu.
+    """
+    if recipient_list and any(recipient_list):
+        recipients = ", ".join([e for e in recipient_list if e])
+        
+        # Terminalde temiz ve tek bir Türkçe bildirim gösterelim:
+        print("\n" + "="*60)
+        print(f"📧 E-POSTA BİLDİRİMİ GÖNDERİLDİ")
+        print(f"📩 Alıcı : {recipients}")
+        print(f"📌 Konu  : {subject}")
+        print(f"📝 İçerik:\n{message}")
+        print("="*60 + "\n")
+        
+        try:
+            # Gerçek sunucuda (SMTP) mail gönderir, geliştirme modunda konsolda tekrar basmaması için:
+            from django.conf import settings
+            if not settings.DEBUG:
+                send_mail(
+                    subject=subject,
+                    message=message,
+                    from_email=None,
+                    recipient_list=[email for email in recipient_list if email],
+                    fail_silently=True
+                )
+        except Exception:
+            pass
+
+
+
+
 
 
 
