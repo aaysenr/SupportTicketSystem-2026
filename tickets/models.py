@@ -268,3 +268,43 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.recipient.username} - {self.message}"
+
+
+
+
+class ChatGroup(models.Model):
+    """
+    Yöneticiler için özel sohbet grupları ve Genel Ekip Odası modeli.
+    """
+    name = models.CharField(max_length=150, verbose_name="Grup Adı")
+    is_general = models.BooleanField(default=False, verbose_name="Genel Ekip Odası Mı?")
+    members = models.ManyToManyField(User, related_name='chat_groups', verbose_name="Grup Üyeleri")
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Oluşturan Yönetici")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Oluşturulma Tarihi")
+
+    class Meta:
+        verbose_name = "Sohbet Grubu"
+        verbose_name_plural = "Sohbet Grupları"
+
+    def __str__(self):
+        return self.name
+
+
+class ChatMessage(models.Model):
+    """
+    Yöneticiler arası Grup sohbeti ve Birebir (DM) mesajlaşma modeli.
+    """
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_chat_messages', verbose_name="Gönderen")
+    group = models.ForeignKey(ChatGroup, on_delete=models.CASCADE, null=True, blank=True, related_name='messages', verbose_name="İlişkili Grup")
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='received_chat_messages', verbose_name="Alıcı (Özel Mesaj)")
+    content = models.TextField(verbose_name="Mesaj İçeriği")
+    is_read = models.BooleanField(default=False, verbose_name="Okundu mu?")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Tarih")
+
+    class Meta:
+        verbose_name = "Sohbet Mesajı"
+        verbose_name_plural = "Sohbet Mesajları"
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.sender.username}: {self.content[:30]}"
