@@ -1,10 +1,29 @@
+import random
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 
 # İçe Aktarmalar (Imports)
 # from django.db import models: Django'nun veritabanı yönetim araçlarını ve sütun tiplerini (CharField, ForeignKey vb.) projeye dahil eder.
 # from django.contrib.auth.models import User: Django'nun hazır kullanıcı yönetimi modelini projeye aktarır.
+
+
+class EmailVerification(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='email_verification')
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    def generate_code(self):
+        """6 haneli rastgele kod üretir"""
+        self.code = str(random.randint(100000, 999999))
+        self.created_at = timezone.now()
+        self.save()
+    def is_valid(self):
+        """Kodun 10 dakika boyunca geçerli olmasını sağlar"""
+        now = timezone.now()
+        diff = now - self.created_at
+        return diff.total_seconds() < 600 # 600 saniye = 10 dakika
+
 
 
 class Category(models.Model):
@@ -115,12 +134,21 @@ class Ticket(models.Model):
     # Talebe Atanan Yönetici (Boş bırakılabilir)
     assigned_to = models.ForeignKey(
         User, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True, 
-        related_name='assigned_tickets', 
-        verbose_name="Atanan Yönetici"
+        on_delete=models.SET_NULL,  # kullanıcı silinirse, ilişkili alan NULL olarak ayarlanır.
+        null=True,  # veritabanında NULL olarak saklanabilir
+        blank=True,  # boş bırakılabilir
+        related_name='assigned_tickets',  # ilişki kurulduğunda kullanıcıya ait talep listesini döndürür.
+        verbose_name="Atanan Yönetici"  # admin panelinde görünecek başlık
     )
+
+    
+    attachment = models.FileField(  # dosya ekleme
+        upload_to='ticket_attachments/%Y/%m/%d/',  # dosya yükleme yolu
+        blank=True,  # boş bırakılabilir
+        null=True,  # veritabanında NULL olarak saklanabilir
+        verbose_name="Dosya / Görsel Eki" # admin panelinde görünecek başlık
+    )
+
 
 
     # Tarih Bilgileri
@@ -175,7 +203,18 @@ class TicketComment(models.Model):
     # Varsayılan değeri False olduğu için, normal yorumlar tüm kullanıcılar tarafından görülür.
     # Eğer bir yönetici iç konuşma (örneğin teknik analiz, not alma) yapmak isterse bu alanı True yapabilir.
 
-    
+    attachment = models.FileField(  # dosya ekleme
+        upload_to='comment_attachments/%Y/%m/%d/',  # dosya yükleme yolu
+        blank=True,  # boş bırakılabilir
+        null=True,  # veritabanında NULL olarak saklanabilir
+        verbose_name="Dosya / Görsel Eki"  # admin panelinde görünecek başlık
+    )
+   
+    '''
+    upload_to sayesinde dosyalar tarih bazlı klasörlenir. 
+    blank=True, null=True dosya yüklemenin zorunlu olmadığını belirtir.
+    ''' 
+
     class Meta:
         #Yorumlara ait genel ayarlar
         verbose_name = "Yorum"

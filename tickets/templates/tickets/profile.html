@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block title %}Profilim - Destek Sistemi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card shadow-sm border-0 mt-4">
+            <div class="card-header bg-primary text-white py-3">
+                <h4 class="mb-0 fs-5"><i class="bi bi-person-gear me-2"></i>Profil Bilgilerim</h4>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST">
+                    {% csrf_token %}
+                    
+                    {% for field in form %}
+                    <div class="mb-3">
+                        <label for="{{ field.id_for_label }}" class="form-label fw-bold small text-muted">
+                            {{ field.label }}
+                        </label>
+                        {{ field }}
+                        {% for error in field.errors %}
+                        <div class="text-danger small mt-1">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+
+                    <button type="submit" class="btn btn-success w-100 py-2 mt-2 fw-bold">
+                        <i class="bi bi-check-circle me-1"></i> Bilgileri Güncelle
+                    </button>
+                </form>
+
+                <hr class="my-4">
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-0 fw-bold">Şifre Güvenliği</h6>
+                        <small class="text-muted">Hesap şifrenizi dilediğiniz zaman güncelleyebilirsiniz.</small>
+                    </div>
+                    <a href="{% url 'change_password' %}" class="btn btn-outline-warning text-dark fw-bold btn-sm">
+                        <i class="bi bi-key me-1"></i> Şifre Değiştir
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

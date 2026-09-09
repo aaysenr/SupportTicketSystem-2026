@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">E-Posta Doğrulama</h4>
+            </div>
+            <div class="card-body">
+                <p><strong>{{ user.email }}</strong> adresine gönderilen 6 haneli onay kodunu giriniz.</p>
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="code" class="form-label">Doğrulama Kodu:</label>
+                        <input type="text" name="code" id="code" class="form-control text-center fs-4" maxlength="6" required placeholder="123456" autocomplete="off">
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Hesabı Doğrula ve Giriş Yap</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

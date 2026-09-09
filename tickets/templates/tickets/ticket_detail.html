@@ -59,7 +59,7 @@
 
     <div class="card-body">
 
-                <!-- Talebin Üst Bilgileri (Kullanıcı, Atanan Yönetici, Kategori, Oluşturulma & Güncellenme Tarihi) -->
+        <!-- Talebin Üst Bilgileri (Kullanıcı, Atanan Yönetici, Kategori, Oluşturulma & Güncellenme Tarihi) -->
         <div class="row text-muted border-bottom pb-3 mb-3 small">
             <div class="col-md-3">
                 <i class="bi bi-person me-1"></i><strong>Oluşturan:</strong> {{ ticket.created_by.username }}
@@ -84,14 +84,31 @@
             </div>
         </div>
 
-                <!-- Talebin Açıklaması -->
+        <!-- TALEP DOSYA / GÖRSEL EKİ ÖNİZLEMESİ -->
+        {% if ticket.attachment %}
+            <div class="mt-3 p-3 bg-light rounded border mb-3">
+                <strong><i class="bi bi-paperclip"></i> Ek Dosya / Görsel:</strong>
+                {% if ticket.attachment.name|lower|slice:"-4:" == ".png" or ticket.attachment.name|lower|slice:"-4:" == ".jpg" or ticket.attachment.name|lower|slice:"-5:" == ".jpeg" %}
+                    <div class="mt-2">
+                        <img src="{{ ticket.attachment.url }}" alt="Ek Görsel" class="img-fluid rounded shadow-sm" style="max-height: 300px;">
+                    </div>
+                {% else %}
+                    <div class="mt-2">
+                        <a href="{{ ticket.attachment.url }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-download"></i> Dosyayı İndir / Görüntüle
+                        </a>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <!-- Talebin Açıklaması -->
         <div class="ticket-description">
             <h5 class="fw-bold text-secondary mb-2">Talep Açıklaması:</h5>
             <p class="card-text fs-6 lead text-dark">{{ ticket.description|linebreaks }}</p>
         </div>
     </div>
 </div>
-
 
 
 <!-- Yorumlar Geçmişi Kartı -->
@@ -116,6 +133,19 @@
                 <small class="text-muted">{{ comment.created_at|date:"d.m.Y H:i" }}</small>
             </div>
             <p class="mb-0 text-dark">{{ comment.content|linebreaks }}</p>
+
+            <!-- YORUM DOSYA / GÖRSEL EKİ ÖNİZLEMESİ -->
+            {% if comment.attachment %}
+            <div class="mt-2">
+                {% if comment.attachment.name|lower|slice:"-4:" == ".png" or comment.attachment.name|lower|slice:"-4:" == ".jpg" or comment.attachment.name|lower|slice:"-5:" == ".jpeg" %}
+                    <img src="{{ comment.attachment.url }}" alt="Yorum Eki" class="img-fluid rounded border shadow-sm" style="max-height: 200px;">
+                {% else %}
+                    <a href="{{ comment.attachment.url }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-paperclip"></i> Yorum Ekini İndir / Görüntüle
+                    </a>
+                {% endif %}
+            </div>
+            {% endif %}
         </div>
         {% empty %}
 
@@ -135,7 +165,7 @@
         </h5>
     </div>
     <div class="card-body p-4">
-        <form method="POST">
+        <form method="POST" enctype="multipart/form-data">
             {% csrf_token %}
             <div class="mb-3">
                 <label for="{{ comment_form.content.id_for_label }}" class="form-label fw-bold">
@@ -144,6 +174,17 @@
                 {{ comment_form.content }}
                 {% if comment_form.content.errors %}
                 <div class="text-danger small mt-1">{{ comment_form.content.errors }}</div>
+                {% endif %}
+            </div>
+
+            <!-- YORUM DOSYA EKLENTİSİ ALANI -->
+            <div class="mb-3">
+                <label for="{{ comment_form.attachment.id_for_label }}" class="form-label fw-bold">
+                    {{ comment_form.attachment.label }}
+                </label>
+                {{ comment_form.attachment }}
+                {% if comment_form.attachment.errors %}
+                <div class="text-danger small mt-1">{{ comment_form.attachment.errors }}</div>
                 {% endif %}
             </div>
 

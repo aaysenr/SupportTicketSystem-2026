@@ -4,7 +4,11 @@ from .forms import TicketForm,CommentForm, UserRegisterForm # CommentForm sını
 from django.contrib.auth.models import User
 from django.db.models import Q  # Karmaşık arama sorguları (OR işlemleri) için Q nesnesini içeri aktarıyoruz
 #Q Nesnesi: Normalde Django ORM'de .filter(title=..., description=...) yazıldığında araya AND (VE) koyar. SQL'deki OR (VEYA) mantığını kurabilmek için Q nesnesini içeri aktarırız.
-
+from django.core.mail import send_mail
+from .models import EmailVerification
+from django.contrib.auth import login, logout, authenticate, update_session_auth_hash 
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, PasswordChangeForm #
+from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm 
 
 
 # render: Django'nun HTML şablonlarını (template) verilerle birleştirip kullanıcıya sunmasını sağlayan pratik bir yardımcı fonksiyondur.
@@ -41,6 +45,36 @@ messages: İşlem tamamlandığında (Örn: "Hesap oluşturuldu", "Yorum eklendi
 """
 
 
+def verify_email(request):
+    user_id = request.session.get('unverified_user_id')
+    if not user_id:
+        return redirect('register')
+    
+    user = get_object_or_404(User, id=user_id)
+
+    if request.method == 'POST':
+        entered_code = request.POST.get('code', '').strip()
+        try:
+            verification = user.email_verification
+            if verification.code == entered_code and verification.is_valid():
+                # Kod doğru ve süresi geçerli!
+                user.is_active = True
+                user.save()
+                
+                # Oturumu temizle ve otomatik giriş yaptır
+                del request.session['unverified_user_id']
+                login(request, user)
+                messages.success(request, f"Tebrikler {user.username}! E-postanız başarıyla doğrulandı ve hesabınız aktifleştirildi.")
+                return redirect('ticket_list')
+            else:
+                messages.error(request, "Girdiğiniz doğrulama kodu hatalı veya süresi dolmuş!")
+        except EmailVerification.DoesNotExist:
+            messages.error(request, "Doğrulama bilgisi bulunamadı.")
+
+    return render(request, 'tickets/verify_email.html', {'user': user})
+
+
+
 # --- 1. KULLANICI OTURUM GÖRÜNÜMLERİ (AUTH VIEWS) ---
 
 def register_user(request):
@@ -58,16 +92,31 @@ def register_user(request):
         form = UserRegisterForm(request.POST)
         # Kullanıcının girdiği kullanıcı adı ve şifre ikilisini doğrular.
         if form.is_valid():
-            user = form.save()
-            # user = form.save(): Yeni kullanıcıyı auth_user tablosuna şifresini hash'leyerek kaydeder.
-            login(request, user)
-            #login(request, user): Kayıt biter bitmez kullanıcıyı tekrar giriş formuyla uğraştırmadan otomatik olarak sisteme giriş yaptırır.
-            messages.success(request, f"Hoş geldiniz {user.username}! Hesabınız başarıyla oluşturuldu.")
-            #messages.success(...): Yeşil bir başarı mesajı hazırlar.
-            return redirect('ticket_list') #redirect: Kayıt işlemi bittikten sonra kullanıcıyı otomatik olarak bilet listesi sayfasına yönlendirir.
+
+            # 1. Kullanıcıyı henüz pasif (is_active=False) olarak kaydediyoruz
+            user = form.save(commit=False)
+            user.is_active = False
+            user.save()
+
+             # 2. Onay kodu oluşturuyoruz
+            verification, created = EmailVerification.objects.get_or_create(user=user)
+            verification.generate_code()
+
+             # 3. E-posta gönderiyoruz
+            send_mail(
+                subject="E-Posta Dogrulama Kodu",
+                message=f"Merhaba {user.username},\n\nDestek Sistemine kayit isleminizi tamamlamak için dogrulama kodunuz: {verification.code}\n\nBu kod 10 dakika süreyle gecerlidir.",
+                from_email=None,
+                recipient_list=[user.email],
+            )
+            # 4. Kullanıcı ID'sini oturuma kaydedip doğrulama sayfasına yönlendiriyoruz
+            request.session['unverified_user_id'] = user.id
+            messages.info(request, "Lütfen e-posta adresinize gönderilen 6 haneli doğrulama kodunu girin.")
+            return redirect('verify_email')
         else:
             messages.error(request, "Lütfen formdaki hataları düzeltin.")
         #else: Eğer form geçerli değilse (Hata varsa)...
+    
     else:
         form = UserRegisterForm()
     #else: Eğer POST isteği yoksa (Sayfa ilk açılıyorsa)...
@@ -376,7 +425,10 @@ def ticket_detail(request, pk):
     
     if request.method == 'POST':
         # Yorum gönderme butonu tıklandıysa (POST isteği)
-        comment_form = CommentForm(request.POST, user=request.user)
+        comment_form = CommentForm(request.POST, request.FILES, user=request.user)
+        # request.FILES: Kullanıcının form üzerinden yüklediği dosya verilerini tutan sözlüktür.
+        # request.POST: Kullanıcının form üzerinden gönderdiği metin verilerini (başlık, açıklama, kategori vb.) tutar.
+        # user=request.user: Formun içine, şu an giriş yapmış olan kullanıcının bilgilerini "yazar" olarak kaydeder.    
 
         if comment_form.is_valid():
 
@@ -488,7 +540,10 @@ def ticket_create(request):
     if request.method == 'POST':
         #Kullanıcı formu doldurup Gönder butonuna bastıysa (POST isteği)
         # Kullanıcı formu ilk kez açtığında içi boş, temiz bir form nesnesi üretir ve ticket_form.html şablonuna gönderir.
-        form = TicketForm(request.POST, user=request.user) # user=request.user eklendi
+        form = TicketForm(request.POST, request.FILES, user=request.user)
+        # request.FILES: Kullanıcının form üzerinden yüklediği dosya verilerini tutan sözlüktür.
+        # request.POST: Kullanıcının form üzerinden gönderdiği metin verilerini (başlık, açıklama, kategori vb.) tutar.
+        # user=request.user: Formun içine, şu an giriş yapmış olan kullanıcının bilgilerini "yazar" olarak kaydeder.
         # Bir form HTML sayfasıdır. Kullanıcı bu formu doldurup "Gönder" (Submit) butonuna tıkladığında, tarayıcı sayfanın URL'ine bir POST isteği gönderir.
         # Kullanıcının girdiği verileri (request.POST) alıp forma yükler.
 
@@ -578,25 +633,40 @@ def ticket_edit(request, pk):
         
         
         
-        form = TicketForm(request.POST, instance=ticket, user=request.user) # user=request.user eklendi
-        if form.is_valid():
+        form = TicketForm(request.POST, request.FILES, instance=ticket, user=request.user)
+        # request.FILES: Kullanıcının form üzerinden yüklediği dosya verilerini tutan sözlüktür.
+        # request.POST: Kullanıcının form üzerinden gönderdiği metin verilerini (başlık, açıklama, kategori vb.) tutar.
+        # user=request.user: Formun içine, şu an giriş yapmış olan kullanıcının bilgilerini "yazar" olarak kaydeder.
+        '''
+        Django standart form verilerini (başlık, açıklama vb.) request.POST içinde taşır.
+        Kullanıcının bilgisayarından seçip yüklediği resim/dosya verileri ise ayrı bir paket olan request FILES içerisinde gelir. 
+        Form nesnesine request.FILES parametresini vermezsek Django yüklenen dosyayı görmezden gelir ve kaydetmez.
+        '''  
+
+        # Bir form HTML sayfasıdır. Kullanıcı bu formu doldurup "Gönder" (Submit) butonuna tıkladığında,
+        #  tarayıcı sayfanın URL'ine bir POST isteği gönderir.
+        # Kullanıcının girdiği verileri (request.POST) alıp forma yükler.
+
+        if form.is_valid(): # Form kurallara uygunsa (boş bırakılan zorunlu alan yoksa vb.)
             
             updated_ticket = form.save()
+            # ticket = form.save(commit=False): Formdaki verilerden bir Ticket nesnesi üretir ama henüz veritabanına kaydetmez, bellekte bekletir.
             
             # Değişiklikleri tespit edelim
-            changes = []
-            new_status = updated_ticket.get_status_display()
-            new_assigned = updated_ticket.assigned_to.username if updated_ticket.assigned_to else "Atanmadı"
+            changes = [] # Değişiklikler listesi
+            new_status = updated_ticket.get_status_display() # Formdan gelen güncel durumu al
+            new_assigned = updated_ticket.assigned_to.username if updated_ticket.assigned_to else "Atanmadı" # Formdan gelen güncel atanan kullanıcıyı al
             if old_status != new_status:
-                changes.append(f"Durum: '{old_status}' ➔ '{new_status}'")
+                changes.append(f"Durum: '{old_status}' ➔ '{new_status}'")  # Eğer durum değişmişse listeye ekle
             
             if old_assigned != new_assigned:
-                changes.append(f"Atanan Yönetici: '{old_assigned}' ➔ '{new_assigned}'")
+                changes.append(f"Atanan Yönetici: '{old_assigned}' ➔ '{new_assigned}'") # Eğer atanan kullanıcı değişmişse listeye ekle
             # Eğer bir değişiklik yapıldıysa otomatik sistem yorumu düşelim
             if changes:
-                log_content = "⚙️ Güncelleme yapıldı: " + ", ".join(changes)
+                log_content = "Güncelleme yapıldı: " + ", ".join(changes)
             else:
-                log_content = "⚙️ Talep detayları güncellendi."
+                log_content = "Talep detayları güncellendi."
+            
             # Sistem Yorumunu Kaydet
             from .models import TicketComment
             TicketComment.objects.create(
@@ -671,3 +741,49 @@ def ticket_delete(request, pk):
     ticket_confirm_delete.html: GET isteğinde kullanıcıya "Emin misiniz?" onay kartını sunar.
 
     """
+
+
+
+@login_required
+def profile_view(request):
+    """
+    Kullanıcı profil bilgilerini görüntüleme ve güncelleme ekranı.
+    """
+    if request.method == 'POST':
+
+        form = UserProfileForm(request.POST, instance=request.user, user=request.user)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Profil bilgileriniz başarıyla güncellendi.")
+            return redirect('profile')
+        else:
+            messages.error(request, "Lütfen formdaki hataları düzeltin.")
+    else:
+        form = UserProfileForm(instance=request.user, user=request.user)
+    
+    return render(request, 'tickets/profile.html', {'form': form})
+
+
+@login_required
+def change_password_view(request):
+    """
+    Güvenli Şifre Değiştirme Ekranı.
+    """
+    if request.method == 'POST':
+        form = PasswordChangeForm(request.user, request.POST)
+        if form.is_valid():
+            user = form.save()
+            # Şifre değiştiğinde kullanıcının oturumunun kapanmasını engeller:
+            update_session_auth_hash(request, user)
+            messages.success(request, "Şifreniz başarıyla değiştirildi!")
+            return redirect('profile')
+        else:
+            messages.error(request, "Lütfen şifre değiştirme formundaki hataları düzeltin.")
+    else:
+        form = PasswordChangeForm(request.user)
+    
+    return render(request, 'tickets/change_password.html', {'form': form})
+
+
+
+   

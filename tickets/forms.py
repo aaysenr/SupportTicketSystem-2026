@@ -2,6 +2,7 @@ from django import forms # from django import forms: Django'nun form oluşturma,
 from django.contrib.auth.models import User 
 from .models import Ticket, TicketComment # Formun hangi veritabanı tablosunu temel alacağını belirtmek için Ticket ve TicketComment modelini içe aktarır.
 from django.contrib.auth.forms import UserCreationForm 
+from captcha.fields import CaptchaField 
 
 class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından türeyen bir form sınıfı tanımlar. Bu sayede Ticket modelindeki alanları otomatik olarak bir web formuna dönüştürür.
     """
@@ -31,7 +32,7 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
     class Meta: # Django'ya bu formun hangi modeli kullanacağını ve hangi alanları göstereceğini bildirir
         model = Ticket # Formun Ticket veritabanı tablosundan türetileceğini belirtir.
         # Formda kullanıcının doldurmasını istediğimiz alanlar:
-        fields = ['title', 'category', 'priority', 'status','assigned_to','description']
+        fields = ['title', 'category', 'priority', 'status', 'assigned_to', 'description', 'attachment']
 
         # Form alanlarının HTML görünümünü ve davranışlarını (placeholder, class, rows vb.) tanımlar.
         # ModelForm içindeki Meta sınıfında tanımlanan bu bölüm,
@@ -70,12 +71,16 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
             }),
             'assigned_to': forms.Select(attrs={
                 'class': 'form-select'
-            }), # EKLENDİ
+            }), 
             'description': forms.Textarea(attrs={
                 'class': 'form-control',
                 'rows': 5,
                 'placeholder': 'Yaşadığınız sorunu detaylıca açıklayınız...'
             }),
+            'attachment': forms.FileInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Bir dosya veya görsel seçin...'
+        }),
         }
 
         #widgets: HTML input etiketlerinin (text, select, textarea vb.) görünümünü ve özelliklerini (class, placeholder vb.) tanımladığımız yerdir.
@@ -102,8 +107,9 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
             'category': 'Kategori',
             'priority': 'Öncelik Seviyesi',
             'status': 'Talep Durumu',
-            'assigned_to': 'Atanan Yönetici', # EKLENDİ
+            'assigned_to': 'Atanan Yönetici',
             'description': 'Detaylı Açıklama',
+            'attachment': 'Ek Dosya / Görsel (PNG, JPG, PDF, LOG)',
         }
 
 
@@ -128,7 +134,7 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
 
     class Meta:
         model = TicketComment # Formun bağlanacağı veritabanı tablosunu seçer.
-        fields = ['content','is_internal'] # Formda gösterilecek alanlar.
+        fields = ['content','is_internal','attachment'] # Formda gösterilecek alanlar.
 
         #model = TicketComment: Formun veritabanındaki TicketComment tablosuyla eşleşeceğini belirtir.
 
@@ -143,6 +149,9 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
             }),
             'is_internal': forms.CheckboxInput(attrs={
                 'class': 'form-check-input',
+            }),
+            'attachment': forms.FileInput(attrs={
+                'class': 'form-control',
             }),
         }
         
@@ -163,6 +172,7 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
         labels = {
             'content': 'Yorum / Cevap Yazın',
             'is_internal': 'Bu bir gizli İç Nottur (Sadece Yöneticiler Görebilir)',
+            'attachment': 'Ek Dosya / Görsel',
         }
 
         #labels: Kutunun hemen üstünde HTML <label> olarak görünecek başlığı Türkçeleştirir.
@@ -182,12 +192,61 @@ class UserRegisterForm(UserCreationForm):
         })
     )
 
+    captcha = CaptchaField(label="Güvenlik Kodu")
+
     class Meta(UserCreationForm.Meta):
         model = User
         fields = ['username', 'email']
+
+
+    def clean_email(self):
+        email = self.cleaned_data.get('email')
+        if User.objects.filter(email=email).exists():
+            raise forms.ValidationError("Bu e-posta adresi zaten başka bir hesap tarafından kullanılıyor.")
+        return email
+        
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Tüm alanlara (Kullanıcı adı, e-posta, parola, parola tekrar) Bootstrap stili verelim
         for field_name, field in self.fields.items():
             field.widget.attrs['class'] = 'form-control'
+
+
+
+class UserProfileForm(forms.ModelForm):
+    """
+    Kullanıcı profil bilgilerini (kullanıcı adı ve e-posta) güncelleme formu.
+    Güvenlik için mevcut şifre onayı gerektirir.
+    """
+    email = forms.EmailField(required=True, label="E-posta Adresi")
+    
+    # Güvenlik için eklendi:
+    current_password = forms.CharField(
+        label="Mevcut Şifreniz (Onay İçin)",
+        widget=forms.PasswordInput(attrs={'placeholder': 'Değişiklikleri onaylamak için mevcut şifrenizi girin'}),
+        required=True
+    )
+
+    class Meta:
+        model = User
+        fields = ['username', 'email']
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop('user', None)  # Görünümden gelen aktif kullanıcı nesnesi
+        super().__init__(*args, **kwargs)
+        for field_name, field in self.fields.items():
+            field.widget.attrs['class'] = 'form-control'
+
+    def clean_email(self):
+        email = self.cleaned_data.get('email')
+        if User.objects.filter(email=email).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError("Bu e-posta adresi başka bir kullanıcı tarafından kullanılıyor.")
+        return email
+
+    # Şifre Doğrulama Kontrolü:
+    def clean_current_password(self):
+        current_password = self.cleaned_data.get('current_password')
+        if self.user and not self.user.check_password(current_password):
+            raise forms.ValidationError("Profil bilgilerinizi güncellemek için mevcut şifrenizi doğru girmelisiniz.")
+        return current_password

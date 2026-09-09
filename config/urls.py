@@ -18,11 +18,15 @@ Including another URLconf
 
 
 from django.contrib import admin
-from django.urls import path, include  # <-- include eklendi
+from django.urls import path, include  
+from django.conf import settings
+from django.conf.urls.static import static
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('tickets.urls')), # <-- Ana adrese bağladık
+    path('captcha/', include('captcha.urls')), 
 ]
 
 """
@@ -32,3 +36,10 @@ path('', include('tickets.urls')):
 Kullanıcı ana adrese ([http://127.0.0.1:8000/](http://127.0.0.1:8000/)) geldiğinde,
 homepage direkt tickets list sayfasına yonlendirir.
 """
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+'''
+Geliştirme ortamında (DEBUG ortamında) yüklenen resim ve dosyaların web tarayıcısında açılabilmesini sağlar.
+'''

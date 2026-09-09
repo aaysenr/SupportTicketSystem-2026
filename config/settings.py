@@ -41,7 +41,8 @@ INSTALLED_APPS = [
     # Benim uygulamam:
     'tickets', 
     #Django'nun tickets adında bir uygulama oluşturduğumumdan haberdar olması için onu ana ayarlara tanıtıyorum.
-
+    
+    'captcha',
     
 ]
 
@@ -153,3 +154,17 @@ LOGOUT_REDIRECT_URL = 'login':
 
 Kullanıcı üst menüden "Çıkış Yap" butonuna bastığında oturumu kapatılır ve otomatik olarak tekrar giriş sayfasına (/login/) yönlendirilir.
 """
+
+
+# Test / Geliştirme Ortamı İçin (Mailleri terminale yazdırır):
+DEFAULT_FROM_EMAIL = 'noreply@desteksistemi.com'
+
+# Media Files (Kullanıcı Yüklemeleri)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+'''
+MEDIA_ROOT yüklenen dosyaların bilgisayarınızda saklanacağı fiziksel klasörü, 
+MEDIA_URL ise bu dosyalara tarayıcıdan hangi web adresiyle erişileceğini belirtir.
+'''
+
