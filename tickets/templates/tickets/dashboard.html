@@ -18,9 +18,14 @@
                 <p class="text-muted small mb-0">Destek sisteminizin anlık durum, kategori ve öncelik analizleri</p>
             </div>
         </div>
-        <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm px-3 py-2 fw-semibold">
-            <i class="bi bi-arrow-left me-1"></i> Talepler Listesine Dön
-        </a>
+                <div class="d-flex gap-2">
+            <a href="{% url 'team_chat' %}" class="btn btn-primary btn-sm px-3 py-2 fw-semibold">
+                <i class="bi bi-chat-dots-fill me-1"></i> Ekip Sohbeti'ne Git
+            </a>
+            <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm px-3 py-2 fw-semibold">
+                <i class="bi bi-arrow-left me-1"></i> Talepler Listesine Dön
+            </a>
+        </div>
     </div>
 </div>
 

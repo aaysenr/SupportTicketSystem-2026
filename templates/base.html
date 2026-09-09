@@ -24,17 +24,22 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
-                    {% if user.is_staff %}
+                                        {% if user.is_staff %}
                     <li class="nav-item">
                        <a class="nav-link text-white fw-bold" href="{% url 'admin_dashboard' %}">
                            <i class="bi bi-pie-chart-fill me-1"></i> İstatistikler
                         </a>
                     </li>
+                    <li class="nav-item">
+                       <a class="nav-link text-white fw-bold" href="{% url 'team_chat' %}">
+                           <i class="bi bi-chat-dots-fill me-1"></i> Ekip Sohbeti
+                        </a>
+                    </li>
                     {% endif %}
                     {% if user.is_authenticated %}
                     <li class="nav-item">
-                        <a class="nav-link active" href="{% url 'ticket_list' %}">
-                            <i class="bi bi-list-task me-1"></i> Talepler
+                        <a class="nav-link active" href="{% url 'ticket_list' %}?mine=1">
+                            <i class="bi bi-person-workspace me-1"></i> Taleplerim
                         </a>
                     </li>
                     {% endif %}

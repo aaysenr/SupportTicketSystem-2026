@@ -3,7 +3,7 @@
 {% block title %}Tüm Destek Talepleri - Destek Sistemi{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h2 class="h3 fw-bold text-gray-800 mb-0">
         {% if user.is_staff %}
             <i class="bi bi-speedometer2 me-2"></i>Yönetici Destek Paneli
@@ -11,10 +11,38 @@
             <i class="bi bi-card-checklist me-2"></i>Destek Taleplerim
         {% endif %}
     </h2>
-    <a href="{% url 'ticket_create' %}" class="btn btn-success">
-        <i class="bi bi-plus-circle me-1"></i> Yeni Talep Oluştur
-    </a>
+    <div class="d-flex align-items-center gap-2">
+        {% if user.is_staff %}
+        <a href="{% url 'team_chat' %}" class="btn btn-primary fw-semibold">
+            <i class="bi bi-chat-dots-fill me-1"></i> Ekip Sohbeti
+        </a>
+        <a href="{% url 'admin_dashboard' %}" class="btn btn-outline-primary fw-semibold">
+            <i class="bi bi-pie-chart-fill me-1"></i> İstatistikler
+        </a>
+        {% endif %}
+        <a href="{% url 'ticket_create' %}" class="btn btn-success fw-semibold">
+            <i class="bi bi-plus-circle me-1"></i> Yeni Talep Oluştur
+        </a>
+    </div>
 </div>
+
+
+{% if user.is_staff %}
+<!-- TÜM TALEPLER / BENİM TALEPLERİM SEKMELERİ (AYRI BUTONLAR) -->
+<div class="mb-4 border-bottom pb-3">
+    <div class="d-flex gap-2">
+        <a href="{% url 'ticket_list' %}" class="btn {% if not filter_mine %}btn-primary{% else %}btn-outline-primary{% endif %} fw-semibold rounded-3 px-3 py-2">
+            <i class="bi bi-collection-fill me-1"></i> Tüm Sistem Talepleri
+        </a>
+        <a href="{% url 'ticket_list' %}?mine=1" class="btn {% if filter_mine %}btn-primary{% else %}btn-outline-primary{% endif %} fw-semibold rounded-3 px-3 py-2">
+            <i class="bi bi-person-fill me-1"></i> Benim Oluşturduğum Talepler
+        </a>
+    </div>
+</div>
+{% endif %}
+
+
+
 
 <!-- Canlı İstatistik Sayaç Kartları (Dashboard) -->
 <div class="row g-3 mb-4">

@@ -287,11 +287,20 @@ def ticket_list(request):
     - Normal kullanıcılar SADECE kendi açtıkları talepleri görür.
     """
 
-    # 1. Kullanıcının rolüne göre temel talep kümesini belirliyoruz (Performans için select_related eklendi)
+
+
+    filter_mine = request.GET.get('mine') == '1' or request.GET.get('filter') == 'mine'
+
+    # 1. Kullanıcının rolüne ve seçili filtreye göre temel talep kümesini belirliyoruz
     if request.user.is_staff:
-         base_tickets = Ticket.objects.all().select_related('created_by', 'category', 'assigned_to')
+        if filter_mine:
+            base_tickets = Ticket.objects.filter(created_by=request.user).select_related('created_by', 'category', 'assigned_to')
+        else:
+            base_tickets = Ticket.objects.all().select_related('created_by', 'category', 'assigned_to')
     else:
         base_tickets = Ticket.objects.filter(created_by=request.user).select_related('created_by', 'category', 'assigned_to')
+
+
 
 
     # base_tickets (Temel Veri Havuzu): Filtreleme yapılmadan önceki ham yetki havuzudur. 
@@ -384,6 +393,7 @@ def ticket_list(request):
         'search_query': search_query,
         'selected_status': selected_status,
         'selected_priority': selected_priority,
+        'filter_mine': filter_mine,
         'status_choices': Ticket.STATUS_CHOICES,
         'priority_choices': Ticket.PRIORITY_CHOICES,
 
