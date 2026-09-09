@@ -23,9 +23,13 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 
+# GÜVENLİK KURALI: Admin paneline SADECE Süper Kullanıcılar (is_superuser=True) girebilsin!
+admin.site.has_permission = lambda request: request.user.is_active and request.user.is_superuser
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('', include('tickets.urls')), # <-- Ana adrese bağladık
+    # Gizli Admin Paneli Adresi (Standart 'admin/' yerine 'super-admin/' yapıldı)
+    path('super-admin/', admin.site.urls),
+    
+    path('', include('tickets.urls')), # Ana uygulama bağlantısı
     path('captcha/', include('captcha.urls')), 
 ]
 
