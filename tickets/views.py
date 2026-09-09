@@ -44,6 +44,66 @@ UserCreationForm, AuthenticationForm: Django'nun şifre kurallarını (en az 8 k
 messages: İşlem tamamlandığında (Örn: "Hesap oluşturuldu", "Yorum eklendi") ekrana bir kerelik Bootstrap alert kutusu basmamızı sağlayan mesaj çerçevesidir.
 """
 
+import json
+from django.db.models import Count
+from django.utils import timezone
+from .models import Category
+
+@login_required
+def admin_dashboard_view(request):
+    """
+    Yöneticiler için İstatistik ve Analiz Dashboard'u.
+    """
+    # Güvenlik Kontrolü: Yalnızca yöneticiler girebilir!
+    if not request.user.is_staff:
+        messages.error(request, "Bu sayfayı görüntüleme yetkiniz yok!")
+        return redirect('ticket_list')
+
+    # 1. Temel Metrikler
+    total_tickets = Ticket.objects.count()
+    open_tickets = Ticket.objects.filter(status='open').count()
+    in_progress_tickets = Ticket.objects.filter(status='in_progress').count()
+    resolved_tickets = Ticket.objects.filter(status='resolved').count()
+    urgent_tickets = Ticket.objects.filter(priority='urgent').count()
+
+    # 2. Bu Ay Açılan ve Bu Ay Çözülen Talepler
+    now = timezone.now()
+    first_day_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    resolved_this_month = Ticket.objects.filter(status='resolved', updated_at__gte=first_day_of_month).count()
+    created_this_month = Ticket.objects.filter(created_at__gte=first_day_of_month).count()
+
+    # 3. Kategori Dağılımı Verileri (Chart.js İçin)
+    categories = Category.objects.annotate(ticket_count=Count('tickets'))
+    category_labels = [cat.name for cat in categories]
+    category_counts = [cat.ticket_count for cat in categories]
+
+    # 4. Öncelik Dağılımı Verileri
+    priority_data = {
+        'Düşük': Ticket.objects.filter(priority='low').count(),
+        'Orta': Ticket.objects.filter(priority='medium').count(),
+        'Yüksek': Ticket.objects.filter(priority='high').count(),
+        'Acil': Ticket.objects.filter(priority='urgent').count(),
+    }
+
+    context = {
+        'total_tickets': total_tickets,
+        'open_tickets': open_tickets,
+        'in_progress_tickets': in_progress_tickets,
+        'resolved_tickets': resolved_tickets,
+        'urgent_tickets': urgent_tickets,
+        'resolved_this_month': resolved_this_month,
+        'created_this_month': created_this_month,
+        
+        # Chart.js'in JSON formatında okuyabilmesi için:
+        'category_labels_json': json.dumps(category_labels),
+        'category_counts_json': json.dumps(category_counts),
+        'priority_labels_json': json.dumps(list(priority_data.keys())),
+        'priority_counts_json': json.dumps(list(priority_data.values())),
+    }
+
+    return render(request, 'tickets/dashboard.html', context)
+
+
 
 def verify_email(request):
     user_id = request.session.get('unverified_user_id')

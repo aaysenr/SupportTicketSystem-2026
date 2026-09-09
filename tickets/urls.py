@@ -18,6 +18,8 @@ urlpatterns = [
     path('login/', views.login_user, name='login'),
     path('logout/', views.logout_user, name='logout'),
     path('verify-email/', views.verify_email, name='verify_email'),
+    path('dashboard/', views.admin_dashboard_view, name='admin_dashboard'), # Yönetici Dashboard'u
+
 
 
 

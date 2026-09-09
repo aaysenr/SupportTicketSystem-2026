@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+
+{% block title %}İstatistik ve Analiz Paneli - Destek Sistemi{% endblock %}
+
+{% block content %}
+<!-- Chart.js Kütüphanesi CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- GÖRSEL OLARAK İYİLEŞTİRİLMİŞ TÜRKÇE BAŞLIK KART -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body p-4 d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <div class="bg-primary bg-opacity-10 text-primary p-3 rounded-4 me-3 d-flex align-items-center justify-content-center">
+                <i class="bi bi-graph-up-arrow fs-3"></i>
+            </div>
+            <div>
+                <h2 class="h4 fw-bold text-dark mb-1">Yönetici İstatistik ve Analiz Paneli</h2>
+                <p class="text-muted small mb-0">Destek sisteminizin anlık durum, kategori ve öncelik analizleri</p>
+            </div>
+        </div>
+        <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm px-3 py-2 fw-semibold">
+            <i class="bi bi-arrow-left me-1"></i> Talepler Listesine Dön
+        </a>
+    </div>
+</div>
+
+<!-- 4 ADET ÖZET METRİK KARTI -->
+<div class="row g-3 mb-4">
+    <!-- Toplam Talep -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm bg-primary text-white p-3 rounded-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="text-white-50 text-uppercase mb-1 small fw-bold">Toplam Talep</h6>
+                    <h2 class="display-6 fw-bold mb-0">{{ total_tickets }}</h2>
+                </div>
+                <i class="bi bi-ticket-detailed display-5 text-white-50"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bu Ay Çözülenler -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm bg-success text-white p-3 rounded-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="text-white-50 text-uppercase mb-1 small fw-bold">Bu Ay Çözülenler</h6>
+                    <h2 class="display-6 fw-bold mb-0">{{ resolved_this_month }}</h2>
+                </div>
+                <i class="bi bi-check-circle display-5 text-white-50"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Açık Bekleyenler -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm bg-warning text-dark p-3 rounded-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="text-dark-50 text-uppercase mb-1 small fw-bold">Açık / Devam Eden</h6>
+                    <h2 class="display-6 fw-bold mb-0">{{ open_tickets|add:in_progress_tickets }}</h2>
+                </div>
+                <i class="bi bi-hourglass-split display-5 text-dark-50"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Acil Talepler -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm bg-danger text-white p-3 rounded-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="text-white-50 text-uppercase mb-1 small fw-bold">Acil Durumdakiler</h6>
+                    <h2 class="display-6 fw-bold mb-0">{{ urgent_tickets }}</h2>
+                </div>
+                <i class="bi bi-exclamation-octagon display-5 text-white-50"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- GRAFİKLER (CHART.JS) -->
+<div class="row g-4 mb-4">
+    <!-- Kategori Dağılımı (Doughnut Chart) -->
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white py-3">
+                <h5 class="mb-0 fw-bold text-gray-800">
+                    <i class="bi bi-pie-chart me-2 text-primary"></i>Kategorilere Göre Talep Dağılımı
+                </h5>
+            </div>
+            <div class="card-body d-flex justify-content-center align-items-center" style="position: relative; height:320px;">
+                <canvas id="categoryChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Öncelik Seviyeleri (Bar Chart) -->
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white py-3">
+                <h5 class="mb-0 fw-bold text-gray-800">
+                    <i class="bi bi-bar-chart-line me-2 text-primary"></i>Öncelik Seviyelerine Göre Dağılım
+                </h5>
+            </div>
+            <div class="card-body d-flex justify-content-center align-items-center" style="position: relative; height:320px;">
+                <canvas id="priorityChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CHART.JS SCRIPT TANIMLAMASI -->
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        // 1. Kategori Dağılım Grafiği (Doughnut)
+        let categoryLabels = {{ category_labels_json|safe }};
+        let categoryCounts = {{ category_counts_json|safe }};
+
+        if (!categoryLabels || categoryLabels.length === 0) {
+            categoryLabels = ["Kategori Bulunmuyor"];
+            categoryCounts = [0];
+        }
+
+        const ctxCat = document.getElementById('categoryChart').getContext('2d');
+        new Chart(ctxCat, {
+            type: 'doughnut',
+            data: {
+                labels: categoryLabels,
+                datasets: [{
+                    data: categoryCounts,
+                    backgroundColor: [
+                        '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796'
+                    ],
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom' }
+                }
+            }
+        });
+
+        // 2. Öncelik Dağılım Grafiği (Bar)
+        const priorityLabels = {{ priority_labels_json|safe }};
+        const priorityCounts = {{ priority_counts_json|safe }};
+
+        const ctxPrio = document.getElementById('priorityChart').getContext('2d');
+        new Chart(ctxPrio, {
+            type: 'bar',
+            data: {
+                labels: priorityLabels,
+                datasets: [{
+                    label: 'Talep Sayısı',
+                    data: priorityCounts,
+                    backgroundColor: [
+                        '#36b9cc', // Düşük (Mavi)
+                        '#f6c23e', // Orta (Sarı)
+                        '#fd7e14', // Yüksek (Turuncu)
+                        '#e74a3b'  // Acil (Kırmızı)
+                    ],
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

@@ -24,6 +24,13 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
+                    {% if user.is_staff %}
+                    <li class="nav-item">
+                       <a class="nav-link text-white fw-bold" href="{% url 'admin_dashboard' %}">
+                           <i class="bi bi-pie-chart-fill me-1"></i> İstatistikler
+                        </a>
+                    </li>
+                    {% endif %}
                     {% if user.is_authenticated %}
                     <li class="nav-item">
                         <a class="nav-link active" href="{% url 'ticket_list' %}">
