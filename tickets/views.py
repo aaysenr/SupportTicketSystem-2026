@@ -10,6 +10,7 @@ from django.contrib.auth import login, logout, authenticate, update_session_auth
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, PasswordChangeForm #
 from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm 
 from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog
+from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog, Notification
 
 
 # render: Django'nun HTML şablonlarını (template) verilerle birleştirip kullanıcıya sunmasını sağlayan pratik bir yardımcı fonksiyondur.
@@ -516,14 +517,21 @@ def ticket_detail(request, pk):
             
 
 
-
-
             # Giriş yapmış olan oturum sahibini doğrudan yazar olarak atıyoruz
             comment.author = request.user
             comment.save()
 
 
-            # E-POSTA BİLDİRİMİ: Yorumu yazan kişi talep sahibi değilse (Yönetici ise) talep sahibine mail at
+            
+            # CANLI BİLDİRİM: Yorumu yazan kişi talep sahibi değilse bildirim oluştur
+            if comment.author != ticket.created_by:
+                Notification.objects.create(
+                    recipient=ticket.created_by,
+                    actor=comment.author,
+                    ticket=ticket,
+                    message=f"#{ticket.ticket_number} talebinize {comment.author.username} tarafından yanıt eklendi."
+                )
+            # E-POSTA BİLDİRİMİ
             if comment.author != ticket.created_by and ticket.created_by.email:
                 send_notification_email(
                     subject=f"[Destek Talebi] #{ticket.ticket_number} Talebinize Yeni Yanıt Geldi",
@@ -531,17 +539,12 @@ def ticket_detail(request, pk):
                     recipient_list=[ticket.created_by.email]
                 )
 
-  
             messages.success(request, "Yorumunuz başarıyla eklendi.")
 
 
             #comment.author: Yorumu yazan kişiyi (author) oturum açmış kullanıcı olarak atar.
 
             #comment.save(): Talebi, yazarı ve içeriği artık eksiksiz olan yorumu veritabanına fiziksel olarak kaydeder.
-
-
-
-
 
 
             #return redirect('ticket_detail', pk=ticket.pk): İşlem başarılı olduğu için tarayıcıyı 
@@ -565,6 +568,9 @@ def ticket_detail(request, pk):
         #Sayfaya ilk kez girildiğinde (GET), 
         #kullanıcıya sunulmak üzere boş bir CommentForm() üretilir 
         #ve context paketine eklenerek HTML şablonuna gönderilir.
+
+
+
 
     
     
@@ -744,29 +750,40 @@ def ticket_edit(request, pk):
             new_status = updated_ticket.get_status_display() # Formdan gelen güncel durumu al
             new_assigned = updated_ticket.assigned_to.username if updated_ticket.assigned_to else "Atanmadı" # Formdan gelen güncel atanan kullanıcıyı al
 
-            # E-POSTA BİLDİRİMİ: Eğer durum değişmişse talep sahibine mail gönder
+            
+           # CANLI BİLDİRİM: Durum değiştiyse bildirim oluştur (POST İÇİNDE)
+            if old_status != new_status:
+                Notification.objects.create(
+                    recipient=updated_ticket.created_by,
+                    actor=request.user,
+                    ticket=updated_ticket,
+                    message=f"#{updated_ticket.ticket_number} talebinizin durumu '{new_status}' olarak güncellendi."
+                )
+
+
+            
+           # E-POSTA BİLDİRİMİ: Eğer durum değişmişse mail gönder
             if old_status != new_status and updated_ticket.created_by.email:
                 send_notification_email(
                     subject=f"[Destek Talebi] #{updated_ticket.ticket_number} Durumu Güncellendi: {new_status}",
                     message=f"Merhaba {updated_ticket.created_by.username},\n\n#{updated_ticket.ticket_number} numaralı '{updated_ticket.title}' başlıklı talebinizin durumu '{old_status}' konumundan '{new_status}' konumuna güncellenmiştir.\n\nDetayları görüntülemek için sisteme giriş yapabilirsiniz.",
                     recipient_list=[updated_ticket.created_by.email]
                 )
-
             if old_status != new_status:
-                changes.append(f"Durum: '{old_status}' ➔ '{new_status}'") # Eğer durum değişmişse listeye ekle
+                changes.append(f"Durum: '{old_status}' ➔ '{new_status}'")
             
             if old_assigned != new_assigned:
-                changes.append(f"Atanan Yönetici: '{old_assigned}' ➔ '{new_assigned}'") # Eğer atanan kullanıcı değişmişse listeye ekle
-
-            # Eğer bir değişiklik yapıldıysa otomatik sistem yorumu düşelim
+                changes.append(f"Atanan Yönetici: '{old_assigned}' ➔ '{new_assigned}'")
             if changes:
                 for change in changes:
                     TicketActivityLog.objects.create(
-                    ticket=updated_ticket,
-                    actor=request.user,
-                    action=change
-                   )
-           
+                        ticket=updated_ticket,
+                        actor=request.user,
+                        action=change
+                    )
+
+
+            
            
             messages.success(request, "Destek talebi başarıyla güncellendi.")
             return redirect('ticket_detail', pk=ticket.pk)
@@ -784,6 +801,7 @@ def ticket_edit(request, pk):
         # GET İsteği: Formu var olan talebin mevcut verileriyle dolu olarak aç (instance=ticket)
         form = TicketForm(instance=ticket, user=request.user) # user=request.user eklendi
         # Formu Dolu Açma (GET): Kullanıcı sayfaya ilk girdiğinde, form kutularının içine mevcut talep verilerini (başlık, mevcut durum, kategori vb.) otomatik olarak doldurur.
+
 
     context = {
         'form': form,
@@ -911,5 +929,18 @@ def send_notification_email(subject, message, recipient_list):
 
 
 
+@login_required
+def notifications_list_view(request):
+    notifications = Notification.objects.filter(recipient=request.user)
+    return render(request, 'tickets/notifications.html', {'notifications': notifications})
+
+@login_required
+def mark_notification_as_read(request, pk):
+    notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
+    notification.is_read = True
+    notification.save()
+    if notification.ticket:
+        return redirect('ticket_detail', pk=notification.ticket.pk)
+    return redirect('notifications_list')
 
    

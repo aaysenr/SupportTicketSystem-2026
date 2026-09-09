@@ -41,6 +41,39 @@
                 </ul>
                 <div class="d-flex align-items-center gap-2">
                     {% if user.is_authenticated %}
+                    
+                    <!-- BİLDİRİM ZİLİ DROPDOWN (EKLENDİ) -->
+                    <div class="dropdown me-2">
+                        <button class="btn btn-outline-light btn-sm dropdown-toggle position-relative border-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-bell-fill fs-6"></i>
+                            {% if unread_notifications_count > 0 %}
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                                {{ unread_notifications_count }}
+                            </span>
+                            {% endif %}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2" style="width: 320px;">
+                            <li class="dropdown-header fw-bold border-bottom py-2">
+                                <i class="bi bi-bell me-1"></i> Bildirimler
+                            </li>
+                            {% if recent_notifications %}
+                                {% for notif in recent_notifications %}
+                                <li>
+                                    <a class="dropdown-item small py-2 {% if not notif.is_read %}fw-bold bg-light{% endif %}" href="{% url 'mark_notification_read' notif.id %}">
+                                        <div class="text-truncate">{{ notif.message }}</div>
+                                        <small class="text-muted" style="font-size: 0.75rem;"><i class="bi bi-clock me-1"></i>{{ notif.created_at|date:"d.m.Y H:i" }}</small>
+                                    </a>
+                                </li>
+                                {% endfor %}
+                                <li><hr class="dropdown-divider my-1"></li>
+                                <li><a class="dropdown-item text-center small text-primary fw-bold py-2" href="{% url 'notifications_list' %}">Tüm Bildirimleri Gör</a></li>
+                            {% else %}
+                                <li class="dropdown-item small text-muted text-center py-3">Henüz hiç bildiriminiz yok.</li>
+                            {% endif %}
+                        </ul>
+                    </div>
+
+                    <!-- PROFİLİM VE ÇIKIŞ YAP -->
                     <a href="{% url 'profile' %}" class="btn btn-outline-light btn-sm me-2">
                       <i class="bi bi-person-circle me-1"></i><strong>{{ user.username }}</strong> (Profilim)
                     </a>
@@ -75,7 +108,7 @@
                     <i class="bi bi-info-circle-fill me-2"></i>
                 {% endif %}
                 {{ message }}
-                <button type="type" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
             </div>
             {% endfor %}
         {% endif %}

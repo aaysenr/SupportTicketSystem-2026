@@ -247,3 +247,24 @@ class TicketActivityLog(models.Model):
 
     def __str__(self):
         return f"#{self.ticket.id} - {self.action} ({self.created_at.strftime('%d.%m.%Y %H:%M')})"
+
+
+
+class Notification(models.Model):
+    """
+    Kullanıcı içi canlı bildirimler modeli.
+    """
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', verbose_name="Bildirim Alıcısı")
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Bildirimi Tetikleyen")
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True, verbose_name="İlişkili Talep")
+    message = models.CharField(max_length=255, verbose_name="Bildirim Mesajı")
+    is_read = models.BooleanField(default=False, verbose_name="Okundu Mu?")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Tarih")
+
+    class Meta:
+        verbose_name = "Bildirim"
+        verbose_name_plural = "Bildirimler"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.recipient.username} - {self.message}"

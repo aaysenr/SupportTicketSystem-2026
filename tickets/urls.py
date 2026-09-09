@@ -19,6 +19,8 @@ urlpatterns = [
     path('logout/', views.logout_user, name='logout'),
     path('verify-email/', views.verify_email, name='verify_email'),
     path('dashboard/', views.admin_dashboard_view, name='admin_dashboard'), # Yönetici Dashboard'u
+    path('notifications/', views.notifications_list_view, name='notifications_list'),
+    path('notifications/<int:pk>/read/', views.mark_notification_as_read, name='mark_notification_read'),
 
 
 

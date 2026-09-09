@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+
+{% block title %}Bildirimlerim - Destek Sistemi{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm border-0 mt-3">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h4 class="mb-0 fw-bold text-dark fs-5">
+                    <i class="bi bi-bell me-2 text-primary"></i>Bildirimlerim
+                </h4>
+            </div>
+            <div class="card-body p-0">
+                {% if notifications %}
+                <div class="list-group list-group-flush">
+                    {% for notif in notifications %}
+                    <a href="{% url 'mark_notification_read' notif.id %}" class="list-group-item list-group-item-action p-3 {% if not notif.is_read %}bg-light fw-bold{% endif %}">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="text-dark">{{ notif.message }}</span>
+                            <small class="text-muted ms-2">{{ notif.created_at|date:"d.m.Y H:i" }}</small>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-bell-slash display-4 d-block mb-2"></i>
+                    Henüz hiç bildiriminiz yok.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
