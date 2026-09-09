@@ -111,11 +111,39 @@
 </div>
 
 
+<!-- Talep Hareket Geçmişi (Activity Logs / Timeline) -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white py-3">
+        <h5 class="mb-0 fw-bold text-dark">
+            <i class="bi bi-clock-history me-2 text-primary"></i>Talep Hareket Geçmişi
+        </h5>
+    </div>
+    <div class="card-body p-4">
+        {% if activity_logs %}
+        <ul class="list-group list-group-flush">
+            {% for log in activity_logs %}
+            <li class="list-group-item d-flex justify-content-between align-items-center bg-transparent px-0 py-2 border-bottom-0">
+                <div>
+                    <i class="bi bi-dot text-primary fs-4 align-middle"></i>
+                    <strong>{% if log.actor %}{{ log.actor.username }}{% else %}Sistem{% endif %}</strong> 
+                    <span class="text-secondary ms-1">{{ log.action }}</span>
+                </div>
+                <small class="text-muted"><i class="bi bi-clock me-1"></i>{{ log.created_at|date:"d.m.Y H:i" }}</small>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="text-muted small">Henüz hareket kaydı bulunmuyor.</div>
+        {% endif %}
+    </div>
+</div>
+
+
 <!-- Yorumlar Geçmişi Kartı -->
 <div class="card shadow-sm mb-4">
     <div class="card-header bg-light py-3">
         <h5 class="mb-0 fw-bold">
-            <i class="bi bi-chat-left-text me-2"></i>Yorumlar ve Güncellemeler ({{ comments.count }})
+            <i class="bi bi-chat-left-text me-2"></i>Yorumlar ({{ comments.count }})
         </h5>
     </div>
 

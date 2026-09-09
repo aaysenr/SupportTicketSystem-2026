@@ -225,3 +225,25 @@ class TicketComment(models.Model):
     def __str__(self):
         return f"{self.author.username} - {self.ticket.title}"
         # Yorum temsil edilirken "Yazan Kullanıcı - Talep Başlığı" şeklinde metin üretir.
+
+
+
+
+
+class TicketActivityLog(models.Model):
+    """
+    Destek talebi üzerindeki tüm hareketlerin ve durum değişikliklerinin
+    denetim (audit) geçmişini tutan model.
+    """
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='activity_logs', verbose_name="Destek Talebi")
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, verbose_name="İşlemi Yapan")
+    action = models.CharField(max_length=255, verbose_name="Yapılan İşlem")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Tarih")
+
+    class Meta:
+        verbose_name = "Talep Hareketi"
+        verbose_name_plural = "Talep Hareketleri"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"#{self.ticket.id} - {self.action} ({self.created_at.strftime('%d.%m.%Y %H:%M')})"

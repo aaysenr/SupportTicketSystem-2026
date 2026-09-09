@@ -9,6 +9,7 @@ from .models import EmailVerification
 from django.contrib.auth import login, logout, authenticate, update_session_auth_hash 
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, PasswordChangeForm #
 from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm 
+from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog
 
 
 # render: Django'nun HTML şablonlarını (template) verilerle birleştirip kullanıcıya sunmasını sağlayan pratik bir yardımcı fonksiyondur.
@@ -461,18 +462,16 @@ def ticket_detail(request, pk):
 
 
 
-    # YÖNETİCİ KONTROLÜ: Normal kullanıcılar is_internal=True olan yorumları göremez!
-    # 2. Yorumları çekerken yazar (author) bilgisini önceden yükle
-    if request.user.is_staff:
-        comments = ticket.comments.all().select_related('author')
-    else:
-        comments = ticket.comments.filter(is_internal=False).select_related('author')
+    # Sistem log metinlerini yorumlar akışından süzüp sadece gerçek kullanıcı yorumlarını çekiyoruz
+    comments = ticket.comments.exclude(content__startswith='Güncelleme yapıldı').exclude(content__startswith='⚙️ Güncelleme yapıldı').exclude(content='Talep detayları güncellendi.')
 
+    if not request.user.is_staff:
+       comments = comments.filter(is_internal=False)
+
+    comments = comments.select_related('author')
 
   
 
-
-    
     """
     Ters İlişki (Reverse Relation): models.py dosyasında TicketComment modelini yazarken ticket = ForeignKey(Ticket, related_name='comments') tanımlaması yapmıştık.
 
@@ -574,6 +573,7 @@ def ticket_detail(request, pk):
         'ticket': ticket,
         'comments': comments,
         'comment_form': comment_form,
+        'activity_logs': ticket.activity_logs.all(),
     }
 
     """
@@ -644,6 +644,12 @@ def ticket_create(request):
             ticket.save()
             #ticket.save(): Nesne artık eksiksiz olduğu için veritabanına nihai kaydı (INSERT INTO) gerçekleştirir.
             
+            TicketActivityLog.objects.create(
+               ticket=ticket,
+               actor=request.user,
+               action="Destek talebi oluşturuldu."
+            )
+
 
 
         # E-POSTA BİLDİRİMİ: Kullanıcıya Teyit Maili Gönder
@@ -754,20 +760,12 @@ def ticket_edit(request, pk):
 
             # Eğer bir değişiklik yapıldıysa otomatik sistem yorumu düşelim
             if changes:
-                log_content = "Güncelleme yapıldı: " + ", ".join(changes)
-            else:
-                log_content = "Talep detayları güncellendi."
-
-
-
-            # Sistem Yorumunu Kaydet
-            from .models import TicketComment
-            TicketComment.objects.create(
-                ticket=updated_ticket,
-                author=request.user,
-                content=log_content,
-                is_internal=False # Herkesin görebileceği açık sistem logu
-            )
+                for change in changes:
+                    TicketActivityLog.objects.create(
+                    ticket=updated_ticket,
+                    actor=request.user,
+                    action=change
+                   )
            
            
             messages.success(request, "Destek talebi başarıyla güncellendi.")
