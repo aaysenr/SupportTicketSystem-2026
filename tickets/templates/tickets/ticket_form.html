@@ -116,6 +116,21 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
                         <div class="form-text text-muted">Ekran görüntüsü (PNG, JPG) veya doküman (PDF, LOG) ekleyebilirsiniz.</div>
                     </div>
 
+                    <!-- Topluluk / Forum Gizlilik Seçeneği -->
+                    <div class="card bg-light border-0 p-3 mb-4 rounded-3 text-start">
+                        <div class="form-check form-switch mb-1 d-flex align-items-center justify-content-start">
+                            {{ form.is_public }}
+                            <label class="form-check-label fw-bold text-dark ms-2 mb-0" for="{{ form.is_public.id_for_label }}">
+                                🌐 Herkese Açık (Topluluk / Forum Talebi Yap)
+                            </label>
+                        </div>
+                        <div class="form-text text-muted small mt-1 ms-0">
+                            İşaretlerseniz bu talep ve cevabı tüm kullanıcılar tarafından Soru-Cevap (Forum) gibi okunabilir. İşaretlemezseniz özel kalır (sadece siz ve yetkililer görür).
+                        </div>
+                    </div>
+
+ 
+                    </div>
                     <!-- Kaydet ve İptal Butonları -->
                     <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                         {% if ticket %}

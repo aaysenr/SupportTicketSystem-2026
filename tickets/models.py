@@ -149,6 +149,18 @@ class Ticket(models.Model):
         verbose_name="Dosya / Görsel Eki" # admin panelinde görünecek başlık
     )
 
+    
+    is_public = models.BooleanField(
+        default=False, 
+        verbose_name="Herkese Açık (Topluluk / Forum Talebi)",
+        help_text="İşaretlenirse tüm kullanıcılar bu talebi ve çözümünü görebilir. İşaretlenmezse sadece yöneticiler görebilir."
+    )
+
+
+
+
+
+
 
 
     # Tarih Bilgileri

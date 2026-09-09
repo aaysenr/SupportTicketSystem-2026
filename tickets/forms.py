@@ -32,7 +32,9 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
     class Meta: # Django'ya bu formun hangi modeli kullanacağını ve hangi alanları göstereceğini bildirir
         model = Ticket # Formun Ticket veritabanı tablosundan türetileceğini belirtir.
         # Formda kullanıcının doldurmasını istediğimiz alanlar:
-        fields = ['title', 'category', 'priority', 'status', 'assigned_to', 'description', 'attachment']
+        
+        fields = ['title', 'category', 'priority', 'status', 'assigned_to', 'is_public', 'description', 'attachment']
+
 
         # Form alanlarının HTML görünümünü ve davranışlarını (placeholder, class, rows vb.) tanımlar.
         # ModelForm içindeki Meta sınıfında tanımlanan bu bölüm,

@@ -8,7 +8,11 @@
         {% if user.is_staff %}
             <i class="bi bi-speedometer2 me-2"></i>Yönetici Destek Paneli
         {% else %}
-            <i class="bi bi-card-checklist me-2"></i>Destek Taleplerim
+            {% if filter_mine %}
+                <i class="bi bi-person-workspace me-2"></i>Destek Taleplerim
+            {% else %}
+                <i class="bi bi-card-checklist me-2"></i>Destek Talepleri
+            {% endif %}
         {% endif %}
     </h2>
     <div class="d-flex align-items-center gap-2">
@@ -184,9 +188,14 @@
                         <td><strong class="text-primary">{{ ticket.ticket_number }}</strong></td>
                         <td>
                             <a href="{% url 'ticket_detail' ticket.id %}"
-                                class="text-decoration-none fw-bold text-dark">
+                            class="text-decoration-none fw-bold text-dark me-2">
                                 {{ ticket.title }}
                             </a>
+                            {% if ticket.is_public %}
+                            <span class="badge bg-info text-dark rounded-pill" style="font-size: 0.75rem;" title="Herkese Açık Topluluk Talebi"><i class="bi bi-globe me-1"></i>Genel</span>
+                            {% else %}
+                            <span class="badge bg-light text-muted border rounded-pill" style="font-size: 0.75rem;" title="Özel Gizli Talep"><i class="bi bi-lock-fill me-1"></i>Özel</span>
+                            {% endif %}
                         </td>
                         <td>
                             {% if ticket.category %}

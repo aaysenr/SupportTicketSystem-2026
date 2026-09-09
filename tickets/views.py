@@ -291,14 +291,21 @@ def ticket_list(request):
 
     filter_mine = request.GET.get('mine') == '1' or request.GET.get('filter') == 'mine'
 
-    # 1. Kullanıcının rolüne ve seçili filtreye göre temel talep kümesini belirliyoruz
+       # 1. Kullanıcının rolüne ve seçili filtreye göre temel talep kümesini belirliyoruz
     if request.user.is_staff:
         if filter_mine:
             base_tickets = Ticket.objects.filter(created_by=request.user).select_related('created_by', 'category', 'assigned_to')
         else:
             base_tickets = Ticket.objects.all().select_related('created_by', 'category', 'assigned_to')
     else:
-        base_tickets = Ticket.objects.filter(created_by=request.user).select_related('created_by', 'category', 'assigned_to')
+        if filter_mine:
+            # "Taleplerim" Sekmesi: Sadece kendi açtığı talepler (Özel + Genel)
+            base_tickets = Ticket.objects.filter(created_by=request.user).select_related('created_by', 'category', 'assigned_to')
+        else:
+            # "Destek Sistemi" (Genel Forum Akışı): Herkese açık tüm talepler + kullanıcının kendi talepleri
+            base_tickets = Ticket.objects.filter(
+                Q(is_public=True) | Q(created_by=request.user)
+            ).select_related('created_by', 'category', 'assigned_to')
 
 
 
@@ -463,15 +470,11 @@ def ticket_detail(request, pk):
     
     """
 
-    
-    # Güvenlik & Gizlilik Kontrolü: Talebi oluşturan kişi veya yönetici değilse engelle
-    if not request.user.is_staff and ticket.created_by != request.user:
-        messages.error(request, "Bu destek talebini görüntüleme yetkiniz yok!")
+
+    # GİZLİLİK KONTROLÜ: Özel talepleri sadece yetkili yöneticiler veya talebi açan kullanıcı görebilir!
+    if not ticket.is_public and not request.user.is_staff and ticket.created_by != request.user:
+        messages.error(request, "Bu özel destek talebini görüntüleme yetkiniz yok!")
         return redirect('ticket_list')
-
-        #IDOR Güvenlik Duvarı: Kullanıcı ne yöneticiyse ne de o talebin bizzat sahibiyse, işlem hemen kesilir; 
-        #kırmızı bir hata mesajıyla ana sayfaya postalanır.
-
 
 
     # Sistem log metinlerini yorumlar akışından süzüp sadece gerçek kullanıcı yorumlarını çekiyoruz

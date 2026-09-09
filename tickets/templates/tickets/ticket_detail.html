@@ -28,10 +28,16 @@
 <div class="card shadow-sm mb-4">
     <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
         <div>
-            <!-- Talep ID ve Başlığı -->
+            <!-- Talep ID, Başlığı ve Gizlilik Rozeti -->
             <span class="badge bg-dark me-2">{{ ticket.ticket_number }}</span>
-            <h1 class="h4 d-inline fw-bold text-gray-800">{{ ticket.title }}</h1>
+            <h1 class="h4 d-inline fw-bold text-gray-800 me-2">{{ ticket.title }}</h1>
+            {% if ticket.is_public %}
+            <span class="badge bg-info text-dark rounded-pill ms-1"><i class="bi bi-globe me-1"></i>Herkese Açık (Topluluk Talebi)</span>
+            {% else %}
+            <span class="badge bg-secondary rounded-pill ms-1"><i class="bi bi-lock-fill me-1"></i>Özel / Gizli Talep</span>
+            {% endif %}
         </div>
+
         <div>
             <!-- Öncelik Rozeti -->
             {% if ticket.priority == 'urgent' %}
