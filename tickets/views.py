@@ -1136,8 +1136,35 @@ def send_chat_message_view(request):
             group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
             msg = ChatMessage.objects.create(sender=request.user, group=group, content=content)
 
+        # WebSocket kullanıcılarına anlık yayınla (Channel Layer Broadcast)
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                if chat_type == 'dm':
+                    u1, u2 = sorted([request.user.id, recipient.id])
+                    room_group = f"chat_dm_{u1}_{u2}"
+                else:
+                    room_group = f"chat_group_{group.id}"
+                
+                async_to_sync(channel_layer.group_send)(
+                    room_group,
+                    {
+                        "type": "chat_message_broadcast",
+                        "message_id": msg.id,
+                        "sender_id": msg.sender.id,
+                        "sender_name": msg.sender.get_full_name() or msg.sender.username,
+                        "content": msg.content,
+                        "created_at": msg.created_at.strftime('%H:%M')
+                    }
+                )
+        except Exception:
+            pass
+
         return JsonResponse({
             'status': 'success',
+            'message_id': msg.id,
             'sender_id': msg.sender.id,
             'sender_name': msg.sender.get_full_name() or msg.sender.username,
             'content': msg.content,
@@ -1178,24 +1205,33 @@ def create_chat_group_view(request):
 @login_required
 def get_chat_messages_api(request, chat_type, chat_id):
     """
-    Canlı Sohbet Yenileme İçin Mesajları JSON Dönen API
+    Canlı Sohbet Yenileme İçin Mesajları JSON Dönen API.
+    ?after_id=<id> parametresi verildiğinde yalnızca o ID'den sonraki yeni mesajları döner.
     """
     if not request.user.is_staff:
         return JsonResponse({'messages': []}, status=403)
+
+    after_id = request.GET.get('after_id')
 
     if chat_type == 'dm':
         recipient = get_object_or_404(User, id=chat_id, is_staff=True)
         messages_qs = ChatMessage.objects.filter(
             Q(sender=request.user, recipient=recipient) |
             Q(sender=recipient, recipient=request.user)
-        ).order_by('created_at')
+        )
     else:
         group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
-        messages_qs = group.messages.all().order_by('created_at')
+        messages_qs = group.messages.all()
+
+    if after_id and after_id.isdigit():
+        messages_qs = messages_qs.filter(id__gt=int(after_id))
+
+    messages_qs = messages_qs.order_by('created_at')
 
     data = []
     for m in messages_qs:
         data.append({
+            'message_id': m.id,
             'sender_id': m.sender.id,
             'sender_name': m.sender.get_full_name() or m.sender.username,
             'content': m.content,

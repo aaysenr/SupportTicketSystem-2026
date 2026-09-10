@@ -94,78 +94,87 @@
                 <h5 class="card-title mb-0 fw-bold text-dark">
                     {{ active_channel.title }}
                 </h5>
-                <span class="badge bg-primary bg-opacity-10 text-primary px-3 py-1.5 rounded-pill">
-                    <i class="bi bi-circle-fill text-success fs-6 me-1" style="font-size: 0.5rem !important;"></i> Canlı Bağlantı
+                <span id="connectionBadge" class="badge bg-primary bg-opacity-10 text-primary px-3 py-1.5 rounded-pill">
+                    <i id="connectionDot" class="bi bi-circle-fill text-success fs-6 me-1" style="font-size: 0.5rem !important;"></i> 
+                    <span id="connectionStatusText">Bağlanıyor...</span>
                 </span>
             </div>
 
-            <!-- MESAJ GEÇMİŞİ ALANI -->
-            <div class="card-body p-4 bg-light flex-grow-1" id="chatBox" style="height: 420px; overflow-y: auto;">
+            <!-- MESAJLAR ALANI -->
+            <div class="card-body p-4 flex-grow-1 style-scroll" id="chatBox" style="height: 480px; overflow-y: auto; background-color: #f8fafc;">
                 {% for msg in chat_messages %}
-                <div class="d-flex mb-3 {% if msg.sender == user %}justify-content-end{% else %}justify-content-start{% endif %}">
+                <div class="d-flex mb-3 {% if msg.sender == user %}justify-content-end{% else %}justify-content-start{% endif %}" data-message-id="{{ msg.id }}">
                     <div class="message-bubble p-3 rounded-3 shadow-sm {% if msg.sender == user %}bg-primary text-white ms-5{% else %}bg-white text-dark me-5 border{% endif %}" style="max-width: 75%;">
                         {% if msg.sender != user %}
                         <div class="fw-bold small text-primary mb-1">{{ msg.sender.get_full_name|default:msg.sender.username }}</div>
                         {% endif %}
                         <div class="message-content text-break">{{ msg.content }}</div>
-                        <div class="text-end mt-1" style="font-size: 0.7rem; opacity: 0.8;">
-                            {{ msg.created_at|date:"H:i" }}
-                        </div>
+                        <div class="text-end mt-1" style="font-size: 0.7rem; opacity: 0.8;">{{ msg.created_at|date:"H:i" }}</div>
                     </div>
                 </div>
                 {% empty %}
-                <div class="text-center text-muted my-5 py-4" id="noMessageNotice">
-                    <i class="bi bi-chat-square-dots display-4 text-secondary opacity-50 mb-2"></i>
-                    <p class="mb-0">Henüz mesaj yazılmadı. İlk mesajı siz gönderin!</p>
+                <div id="noMessagesPlaceholder" class="text-center text-muted my-5 py-5">
+                    <i class="bi bi-chat-dots display-4 d-block mb-3 opacity-50"></i>
+                    <h6 class="fw-bold">Henüz mesaj bulunmuyor</h6>
+                    <p class="small mb-0">İlk mesajı siz göndererek sohbeti başlatabilirsiniz.</p>
                 </div>
                 {% endfor %}
             </div>
 
-            <!-- MESAJ GÖNDERME FORMU -->
+            <!-- MESAJ YAZMA ALANI -->
             <div class="card-footer bg-white p-3 border-top">
-                <form id="chatForm" class="d-flex gap-2">
+                <form id="chatForm">
                     {% csrf_token %}
                     <input type="hidden" name="chat_type" value="{{ active_channel.type }}">
                     <input type="hidden" name="chat_id" value="{{ active_channel.id }}">
-                    <input type="text" name="content" id="messageInput" class="form-control form-control-lg border-0 bg-light fs-6" placeholder="Mesajınızı yazın..." autocomplete="off" required>
-                    <button type="submit" class="btn btn-primary px-4 d-flex align-items-center justify-content-center">
-                        <i class="bi bi-send-fill fs-5"></i>
-                    </button>
+                    <div class="input-group">
+                        <input type="text" 
+                               name="content" 
+                               id="messageInput" 
+                               class="form-control border-0 bg-light py-2.5 px-3 rounded-start-3" 
+                               placeholder="Mesajınızı buraya yazın..." 
+                               autocomplete="off" 
+                               required>
+                        <button type="submit" class="btn btn-primary px-4 rounded-end-3 fw-semibold">
+                            <i class="bi bi-send-fill me-1"></i> Gönder
+                        </button>
+                    </div>
                 </form>
             </div>
         </div>
     </div>
 </div>
 
-<!-- GRUP OLUŞTURMA MODAL -->
-<div class="modal fade" id="createGroupModal" tabindex="-1" aria-hidden="true">
+<!-- YENİ GRUP OLUŞTURMA MODALI -->
+<div class="modal fade" id="createGroupModal" tabindex="-1" aria-labelledby="createGroupModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow">
-            <form action="{% url 'create_chat_group' %}" method="POST">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold" id="createGroupModalLabel"><i class="bi bi-people-fill text-primary me-2"></i>Yeni Özel Grup Oluştur</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST" action="{% url 'create_chat_group' %}">
                 {% csrf_token %}
-                <div class="modal-header border-0 pb-0">
-                    <h5 class="modal-title fw-bold"><i class="bi bi-people-fill text-primary me-2"></i>Yeni Özel Grup Oluştur</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
-                </div>
                 <div class="modal-body py-4">
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Grup Adı</label>
-                        <input type="text" name="group_name" class="form-control" placeholder="Örn: Nöbetçi Destek Ekibi" required>
+                        <label for="group_name" class="form-label fw-bold small text-muted">Grup Adı</label>
+                        <input type="text" name="group_name" id="group_name" class="form-control" placeholder="Örn: Ağ & Altyapı Ekibi, Acil Müdahale" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Gruba Eklenecek Yöneticiler</label>
-                        <div class="border rounded p-3 bg-light" style="max-height: 180px; overflow-y: auto;">
+                    <div>
+                        <label class="form-label fw-bold small text-muted mb-2">Grup Üyelerini Seçin (Yöneticiler)</label>
+                        <div class="border rounded p-3 style-scroll" style="max-height: 180px; overflow-y: auto;">
                             {% for mgr in managers %}
                                 {% if mgr != user %}
                                 <div class="form-check mb-2">
-                                    <input class="form-check-input" type="checkbox" name="members" value="{{ mgr.id }}" id="user_check_{{ mgr.id }}">
-                                    <label class="form-check-label fw-medium" for="user_check_{{ mgr.id }}">
-                                        {{ mgr.get_full_name|default:mgr.username }} <small class="text-muted">({{ mgr.email }})</small>
+                                    <input class="form-check-input" type="checkbox" name="members" value="{{ mgr.id }}" id="mgr_{{ mgr.id }}">
+                                    <label class="form-check-label small" for="mgr_{{ mgr.id }}">
+                                        <strong>{{ mgr.get_full_name|default:mgr.username }}</strong> ({{ mgr.email }})
                                     </label>
                                 </div>
                                 {% endif %}
                             {% endfor %}
                         </div>
+                        <div class="form-text small">Siz grup kurucusu olarak otomatik ekleneceksiniz.</div>
                     </div>
                 </div>
                 <div class="modal-footer border-0 pt-0">
@@ -177,84 +186,180 @@
     </div>
 </div>
 
-<!-- CANLI AJAX & SOHBET JAVASCRIPT KODLARI -->
+<!-- REAL-TIME WEBSOCKET & ADAPTIVE POLLING FALLBACK JAVASCRIPT -->
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const chatBox = document.getElementById('chatBox');
         const chatForm = document.getElementById('chatForm');
         const messageInput = document.getElementById('messageInput');
+        const connectionBadge = document.getElementById('connectionBadge');
+        const connectionDot = document.getElementById('connectionDot');
+        const connectionStatusText = document.getElementById('connectionStatusText');
         const currentUserId = {{ user.id }};
+        const chatType = "{{ active_channel.type }}";
+        const chatId = "{{ active_channel.id }}";
 
-        // Scroll'u en alta kaydır
+        let socket = null;
+        let pollingInterval = null;
+        let lastMessageId = 0;
+
+        // Sayfadaki en son mesaj ID'sini tespit et
+        document.querySelectorAll('#chatBox [data-message-id]').forEach(el => {
+            const mid = parseInt(el.getAttribute('data-message-id'), 10);
+            if (!isNaN(mid) && mid > lastMessageId) {
+                lastMessageId = mid;
+            }
+        });
+
         function scrollToBottom() {
             chatBox.scrollTop = chatBox.scrollHeight;
         }
         scrollToBottom();
 
-        // AJAX ile Mesaj Gönderme
+        function setStatus(type, text) {
+            if (!connectionStatusText) return;
+            connectionStatusText.textContent = text;
+            if (type === 'ws') {
+                connectionDot.className = 'bi bi-circle-fill text-success fs-6 me-1';
+                connectionBadge.className = 'badge bg-success bg-opacity-10 text-success px-3 py-1.5 rounded-pill';
+            } else if (type === 'poll') {
+                connectionDot.className = 'bi bi-arrow-repeat text-info fs-6 me-1';
+                connectionBadge.className = 'badge bg-info bg-opacity-10 text-info px-3 py-1.5 rounded-pill';
+            } else {
+                connectionDot.className = 'bi bi-exclamation-circle text-warning fs-6 me-1';
+                connectionBadge.className = 'badge bg-warning bg-opacity-10 text-warning px-3 py-1.5 rounded-pill';
+            }
+        }
+
+        function appendMessage(msg) {
+            const placeholder = document.getElementById('noMessagesPlaceholder');
+            if (placeholder) placeholder.remove();
+
+            if (msg.message_id) {
+                const existing = document.querySelector(`[data-message-id="${msg.message_id}"]`);
+                if (existing) return;
+                if (msg.message_id > lastMessageId) lastMessageId = msg.message_id;
+            }
+
+            const isMe = msg.sender_id === currentUserId;
+            const div = document.createElement('div');
+            div.className = `d-flex mb-3 ${isMe ? 'justify-content-end' : 'justify-content-start'}`;
+            if (msg.message_id) div.setAttribute('data-message-id', msg.message_id);
+
+            div.innerHTML = `
+                <div class="message-bubble p-3 rounded-3 shadow-sm ${isMe ? 'bg-primary text-white ms-5' : 'bg-white text-dark me-5 border'}" style="max-width: 75%;">
+                    ${!isMe ? `<div class="fw-bold small text-primary mb-1">${msg.sender_name}</div>` : ''}
+                    <div class="message-content text-break">${msg.content}</div>
+                    <div class="text-end mt-1" style="font-size: 0.7rem; opacity: 0.8;">${msg.created_at}</div>
+                </div>
+            `;
+            chatBox.appendChild(div);
+            scrollToBottom();
+        }
+
+        // 1. WEBSOCKET BAĞLANTISI (ANLIK - REALTIME)
+        function initWebSocket() {
+            const wsScheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = `${wsScheme}${window.location.host}/ws/team-chat/${chatType}/${chatId}/`;
+
+            try {
+                socket = new WebSocket(wsUrl);
+
+                socket.onopen = function () {
+                    setStatus('ws', 'Canlı (WebSocket)');
+                    // WebSocket aktifse polling'i durdur
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                };
+
+                socket.onmessage = function (e) {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (data.status === 'success') {
+                            appendMessage(data);
+                        }
+                    } catch (err) {
+                        console.error('WS mesajı ayrıştırılamadı:', err);
+                    }
+                };
+
+                socket.onclose = function () {
+                    // WebSocket kapanırsa güvenle Polling Fallback'e geç
+                    setStatus('poll', 'Canlı (Akıllı Polling)');
+                    startPollingFallback();
+                };
+
+                socket.onerror = function () {
+                    setStatus('poll', 'Canlı (Akıllı Polling)');
+                    startPollingFallback();
+                };
+            } catch (err) {
+                console.warn('WebSocket başlatılamadı, akıllı polling aktifleşiyor:', err);
+                startPollingFallback();
+            }
+        }
+
+        // 2. AKILLI & ADAPTİF POLLING FALLBACK (Yalnızca Yeni Mesajları Çeker)
+        function fetchNewMessages() {
+            const apiUrl = `/team-chat/api/messages/${chatType}/${chatId}/?after_id=${lastMessageId}`;
+
+            fetch(apiUrl)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.messages && data.messages.length > 0) {
+                        data.messages.forEach(msg => appendMessage(msg));
+                    }
+                })
+                .catch(err => console.error('Polling hatası:', err));
+        }
+
+        function startPollingFallback() {
+            if (pollingInterval) return;
+            // İlk kontrol
+            fetchNewMessages();
+            // Sayfa görünürlüğüne duyarlı polling (Sekme arka plandaysa sunucuyu yormaz)
+            pollingInterval = setInterval(() => {
+                if (!document.hidden) {
+                    fetchNewMessages();
+                }
+            }, 3000);
+        }
+
+        // 3. MESAJ GÖNDERME (Dual Engine: WebSocket veya HTTP AJAX)
         chatForm.addEventListener('submit', function (e) {
             e.preventDefault();
             const content = messageInput.value.trim();
             if (!content) return;
 
-            const formData = new FormData(chatForm);
-
-            fetch("{% url 'send_chat_message' %}", {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': formData.get('csrfmiddlewaretoken')
-                },
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    messageInput.value = '';
-                    fetchMessages(); // Anında yenile
-                }
-            })
-            .catch(err => console.error('Mesaj gönderilemedi:', err));
-        });
-
-        // CANLI MESAJ YENİLEME (POLING)
-        function fetchMessages() {
-            const chatType = "{{ active_channel.type }}";
-            const chatId = "{{ active_channel.id }}";
-            const apiUrl = `/team-chat/api/messages/${chatType}/${chatId}/`;
-
-            fetch(apiUrl)
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                // WebSocket üzerinden anında gönder
+                socket.send(JSON.stringify({ content: content }));
+                messageInput.value = '';
+            } else {
+                // WebSocket hazır değilse güvenli AJAX POST Fallback
+                const formData = new FormData(chatForm);
+                fetch("{% url 'send_chat_message' %}", {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': formData.get('csrfmiddlewaretoken')
+                    },
+                    body: formData
+                })
                 .then(res => res.json())
                 .then(data => {
-                    if (data.messages) {
-                        renderMessages(data.messages);
+                    if (data.status === 'success') {
+                        messageInput.value = '';
+                        appendMessage(data);
                     }
                 })
-                .catch(err => console.error('Mesajlar çekilemedi:', err));
-        }
+                .catch(err => console.error('Mesaj gönderilemedi:', err));
+            }
+        });
 
-        function renderMessages(messages) {
-            if (messages.length === 0) return;
-
-            let html = '';
-            messages.forEach(msg => {
-                const isMe = msg.sender_id === currentUserId;
-                html += `
-                    <div class="d-flex mb-3 ${isMe ? 'justify-content-end' : 'justify-content-start'}">
-                        <div class="message-bubble p-3 rounded-3 shadow-sm ${isMe ? 'bg-primary text-white ms-5' : 'bg-white text-dark me-5 border'}" style="max-width: 75%;">
-                            ${!isMe ? `<div class="fw-bold small text-primary mb-1">${msg.sender_name}</div>` : ''}
-                            <div class="message-content text-break">${msg.content}</div>
-                            <div class="text-end mt-1" style="font-size: 0.7rem; opacity: 0.8;">${msg.created_at}</div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            chatBox.innerHTML = html;
-            scrollToBottom();
-        }
-
-        // 3 saniyede bir yeni mesaj var mı diye kontrol et (Canlı Sohbet)
-        setInterval(fetchMessages, 3000);
+        // WebSocket başlat
+        initWebSocket();
     });
 </script>
 {% endblock %}

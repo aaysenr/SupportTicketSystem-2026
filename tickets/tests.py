@@ -3,7 +3,10 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.exceptions import ValidationError
 from django.urls import reverse
-from tickets.models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, Notification
+from io import StringIO
+from django.core.management import call_command
+from django.conf import settings
+from tickets.models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, Notification, ChatGroup, ChatMessage
 from tickets.validators import validate_file_security
 from django.utils import timezone
 from datetime import timedelta
@@ -404,4 +407,48 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertEqual(res_bulk_cat.status_code, 302)
         self.ticket_tech.refresh_from_db()
         self.assertEqual(self.ticket_tech.category, self.cat_fin)
+
+    # 10. ALTYAPI & PERFORMANS (SECTION C) TESTLERİ
+    def test_production_infrastructure_settings(self):
+        """ASGI, Channels ve veritabanı ayarlarının doğruluğunu test et."""
+        self.assertEqual(settings.ASGI_APPLICATION, 'config.asgi.application')
+        self.assertIn('default', settings.CHANNEL_LAYERS)
+        self.assertIn('daphne', settings.INSTALLED_APPS)
+        self.assertIn('channels', settings.INSTALLED_APPS)
+
+    def test_send_test_email_command(self):
+        """send_test_email yönetim komutunun çalıştığını ve e-posta gönderdiğini test et."""
+        out = StringIO()
+        call_command('send_test_email', 'yonetici@example.com', stdout=out)
+        output = out.getvalue()
+        self.assertIn('E-Posta Servisi Test Ediliyor...', output)
+        self.assertIn('yonetici@example.com', output)
+
+    def test_team_chat_delta_polling_api(self):
+        """Ekip sohbeti API'sinde ?after_id ile yalnızca yeni mesajların çekilmesini test et."""
+        group = ChatGroup.objects.create(name='Operasyon Ekibi', created_by=self.tech_user)
+        group.members.add(self.tech_user)
+
+        msg1 = ChatMessage.objects.create(sender=self.tech_user, group=group, content="Mesaj 1")
+        msg2 = ChatMessage.objects.create(sender=self.tech_user, group=group, content="Mesaj 2")
+        msg3 = ChatMessage.objects.create(sender=self.tech_user, group=group, content="Mesaj 3")
+
+        self.client.login(username='tech_agent', password='TechPass123!')
+
+        # 1. after_id olmadan tüm mesajlar gelir (3 adet)
+        url_all = reverse('get_chat_messages_api', kwargs={'chat_type': 'group', 'chat_id': group.id})
+        res_all = self.client.get(url_all)
+        self.assertEqual(res_all.status_code, 200)
+        data_all = res_all.json()
+        self.assertEqual(len(data_all['messages']), 3)
+
+        # 2. after_id=msg2.id verildiğinde yalnızca msg3 gelir (Delta polling)
+        url_delta = f"{url_all}?after_id={msg2.id}"
+        res_delta = self.client.get(url_delta)
+        self.assertEqual(res_delta.status_code, 200)
+        data_delta = res_delta.json()
+        self.assertEqual(len(data_delta['messages']), 1)
+        self.assertEqual(data_delta['messages'][0]['content'], "Mesaj 3")
+        self.assertEqual(data_delta['messages'][0]['message_id'], msg3.id)
+
 

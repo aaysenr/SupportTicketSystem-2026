@@ -9,8 +9,9 @@ https://docs.djangoproject.com/en/6.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
-
+import os
 from pathlib import Path
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,6 +32,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",  # ASGI / WebSocket desteği için en başta olmalıdır
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -38,12 +40,10 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
-    # Benim uygulamam:
+    # Uygulamalar:
     'tickets', 
-    #Django'nun tickets adında bir uygulama oluşturduğumumdan haberdar olması için onu ana ayarlara tanıtıyorum.
-    
     'captcha',
-    
+    'channels',  # Django Channels (WebSockets)
 ]
 
 MIDDLEWARE = [
@@ -75,17 +75,48 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
-
-# Database
-# https://docs.djangoproject.com/en/6.1/ref/settings/#databases
-
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+# Django Channels Katmanı (WebSocket İletişimi)
+# Yerel geliştirme / test ortamında InMemory, canlıda REDIS_URL tanımlanmışsa Redis kullanılır.
+redis_url = os.environ.get("REDIS_URL")
+if redis_url:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [redis_url],
+            },
+        }
     }
-}
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer"
+        }
+    }
+
+
+# Database (12-Factor App: PostgreSQL / SQLite Çift Uyumluluk)
+# https://docs.djangoproject.com/en/6.1/ref/settings/#databases
+# Canlı ortamda DATABASE_URL veya POSTGRES_DB ortam değişkeni tanımlıysa PostgreSQL kullanılır.
+# Tanımlı değilse yerel geliştirme için SQLite (db.sqlite3) kullanılır.
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=database_url,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
@@ -125,14 +156,31 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 
-# Email
+# Email Konfigürasyonu (12-Factor: Canlıda SMTP, Geliştirmede Console)
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-
-MAILERS = {
-    "default": {
-        "BACKEND": "django.core.mail.backends.console.EmailBackend",
-    },
-}
+# Ortam değişkenlerinde EMAIL_HOST tanımlıysa gerçek SMTP servisi devreye girer.
+# Tanımlı değilse e-postalar konsola yazdırılır (Local development / test güvenliği).
+_email_host = os.environ.get('EMAIL_HOST', '')
+if _email_host:
+    MAILERS = {
+        "default": {
+            "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+            "HOST": _email_host,
+            "PORT": int(os.environ.get('EMAIL_PORT', 587)),
+            "USE_TLS": os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes'),
+            "USE_SSL": os.environ.get('EMAIL_USE_SSL', 'False').lower() in ('true', '1', 'yes'),
+            "USERNAME": os.environ.get('EMAIL_HOST_USER', ''),
+            "PASSWORD": os.environ.get('EMAIL_HOST_PASSWORD', ''),
+        }
+    }
+    DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', os.environ.get('EMAIL_HOST_USER', '') or 'noreply@desteksistemi.com')
+else:
+    MAILERS = {
+        "default": {
+            "BACKEND": "django.core.mail.backends.console.EmailBackend",
+        }
+    }
+    DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@desteksistemi.com')
 
 
 # Kullanıcı oturumu açık değilse yönlendirilecek varsayılan giriş URL'i
@@ -156,9 +204,6 @@ LOGOUT_REDIRECT_URL = 'login':
 Kullanıcı üst menüden "Çıkış Yap" butonuna bastığında oturumu kapatılır ve otomatik olarak tekrar giriş sayfasına (/login/) yönlendirilir.
 """
 
-
-# Test / Geliştirme Ortamı İçin (Mailleri terminale yazdırır):
-DEFAULT_FROM_EMAIL = 'noreply@desteksistemi.com'
 
 # Media Files (Kullanıcı Yüklemeleri)
 MEDIA_URL = '/media/'
