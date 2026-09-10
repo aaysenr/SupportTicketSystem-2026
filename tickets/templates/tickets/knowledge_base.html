@@ -1,0 +1,166 @@
+{% extends 'base.html' %}
+
+{% block title %}Bilgi Bankası & SSS - Destek Sistemi{% endblock %}
+
+{% block content %}
+<!-- HERO & ARAMA ALANI -->
+<div class="card border-0 shadow-sm rounded-4 mb-4 text-white position-relative overflow-hidden" style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);">
+    <div class="card-body p-4 p-md-5 text-center position-relative" style="z-index: 2;">
+        <span class="badge bg-white text-primary px-3 py-2 rounded-pill fw-semibold mb-3">
+            <i class="bi bi-lightbulb-fill me-1 text-warning"></i> Sıkça Sorulan Sorular & Rehberler
+        </span>
+        <h1 class="display-6 fw-bold mb-3">Size Nasıl Yardımcı Olabiliriz?</h1>
+        <p class="lead opacity-75 mb-4 mx-auto" style="max-width: 650px;">
+            Yaygın soruların çözümlerini, hesap güvenliği rehberlerini ve teknik adımları anında keşfedin.
+        </p>
+
+        <!-- Arama Formu -->
+        <form method="GET" action="{% url 'knowledge_base' %}" class="mx-auto" style="max-width: 600px;">
+            <div class="input-group input-group-lg shadow rounded-pill overflow-hidden bg-white p-1">
+                <span class="input-group-text bg-transparent border-0 text-muted ps-3">
+                    <i class="bi bi-search fs-5"></i>
+                </span>
+                <input type="text" name="q" class="form-control border-0 shadow-none ps-2" 
+                       placeholder="Sorunuzu veya anahtar kelimeyi yazın (Örn: Şifre sıfırlama, Fatura)..." 
+                       value="{{ search_query }}">
+                {% if selected_category %}
+                <input type="hidden" name="category" value="{{ selected_category }}">
+                {% endif %}
+                <button class="btn btn-primary rounded-pill px-4 fw-semibold" type="submit">
+                    Ara
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- KATEGORİ FİLTRELERİ -->
+<div class="d-flex gap-2 flex-wrap mb-4 pb-2 border-bottom align-items-center">
+    <span class="text-muted fw-semibold me-2"><i class="bi bi-tags-fill me-1"></i>Kategoriler:</span>
+    <a href="{% url 'knowledge_base' %}{% if search_query %}?q={{ search_query }}{% endif %}" 
+       class="btn btn-sm rounded-pill fw-semibold {% if not selected_category %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+        Tümü
+    </a>
+    {% for cat in categories_stats %}
+    <a href="{% url 'knowledge_base' %}?category={{ cat.code }}{% if search_query %}&q={{ search_query }}{% endif %}" 
+       class="btn btn-sm rounded-pill fw-semibold {% if selected_category == cat.code %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+        {{ cat.name }} <span class="badge bg-secondary-subtle text-dark ms-1">{{ cat.count }}</span>
+    </a>
+    {% endfor %}
+    {% if search_query or selected_category %}
+    <a href="{% url 'knowledge_base' %}" class="btn btn-sm btn-outline-danger rounded-pill ms-auto">
+        <i class="bi bi-x-circle me-1"></i>Filtreleri Temizle
+    </a>
+    {% endif %}
+</div>
+
+<!-- MAKALELER LİSTESİ -->
+{% if articles %}
+<div class="row g-4 mb-4">
+    {% for article in articles %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card h-100 border-0 shadow-sm rounded-3 hover-shadow transition-all">
+            <div class="card-body d-flex flex-column p-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-3 py-1">
+                        {{ article.get_category_display }}
+                    </span>
+                    <span class="text-muted small" title="Görüntülenme">
+                        <i class="bi bi-eye-fill me-1"></i>{{ article.views_count }}
+                    </span>
+                </div>
+                
+                <h5 class="card-title fw-bold mb-2">
+                    <a href="{% url 'knowledge_base_detail' article.id %}" class="text-decoration-none text-body">
+                        {{ article.title }}
+                    </a>
+                </h5>
+                
+                <p class="card-text text-muted small flex-grow-1">
+                    {{ article.content|striptags|truncatewords:25 }}
+                </p>
+
+                <div class="d-flex justify-content-between align-items-center pt-3 border-top mt-3">
+                    <small class="text-muted">
+                        <i class="bi bi-calendar3 me-1"></i>{{ article.updated_at|date:"d M Y" }}
+                    </small>
+                    <a href="{% url 'knowledge_base_detail' article.id %}" class="btn btn-sm btn-outline-primary rounded-pill fw-semibold">
+                        Devamını Oku <i class="bi bi-arrow-right ms-1"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- SAYFALAMA -->
+{% if articles.has_other_pages %}
+<nav class="d-flex justify-content-center mb-4">
+    <ul class="pagination pagination-sm shadow-sm">
+        {% if articles.has_previous %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ articles.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}">« Önceki</a>
+        </li>
+        {% endif %}
+        
+        {% for num in articles.paginator.page_range %}
+            {% if articles.number == num %}
+            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+            {% elif num > articles.number|add:'-3' and num < articles.number|add:'3' %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}">{{ num }}</a>
+            </li>
+            {% endif %}
+        {% endfor %}
+
+        {% if articles.has_next %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ articles.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}">Sonraki »</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="card border-0 shadow-sm rounded-4 p-5 text-center my-4">
+    <div class="py-4">
+        <i class="bi bi-search text-muted display-4 mb-3 d-block"></i>
+        <h4 class="fw-bold mb-2">Aradığınız kriterde makale bulunamadı</h4>
+        <p class="text-muted mb-4">Farklı anahtar kelimeler deneyebilir veya doğrudan yeni bir destek talebi oluşturabilirsiniz.</p>
+        <a href="{% url 'ticket_create' %}" class="btn btn-primary rounded-pill px-4 fw-semibold">
+            <i class="bi bi-plus-circle me-1"></i> Yeni Destek Talebi Aç
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<!-- YARDIM ALMA ÇAĞRISI (CTA BANNER) -->
+<div class="card border-0 shadow-sm rounded-4 p-4 mt-5 bg-body-tertiary">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+        <div class="d-flex align-items-center gap-3">
+            <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center" style="width: 54px; height: 54px; font-size: 24px;">
+                <i class="bi bi-headset"></i>
+            </div>
+            <div>
+                <h5 class="fw-bold mb-1">Aradığınız cevabı bulamadınız mı?</h5>
+                <p class="text-muted mb-0 small">Destek ekibimiz sorularınızı yanıtlamak ve size yardımcı olmak için hazır.</p>
+            </div>
+        </div>
+        <a href="{% url 'ticket_create' %}" class="btn btn-primary fw-semibold rounded-pill px-4">
+            <i class="bi bi-pencil-square me-1"></i> Destek Talebi Başlat
+        </a>
+    </div>
+</div>
+
+<style>
+.hover-shadow {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.hover-shadow:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important;
+}
+</style>
+{% endblock %}

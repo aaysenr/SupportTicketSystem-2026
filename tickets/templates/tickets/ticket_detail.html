@@ -2,207 +2,521 @@
 
 {% block title %}{{ ticket.ticket_number }} - {{ ticket.title }} - Destek Sistemi{% endblock %}
 
-
 {% block content %}
-<div class="mb-3 d-flex justify-content-between align-items-center">
+<!-- Üst Aksiyon ve Geri Dönüş Çubuğu -->
+<div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
     <!-- Tüm Talepler listesine geri dönmek için bağlantı butonu -->
-    <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm">
+    <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
         <i class="bi bi-arrow-left me-1"></i> Tüm Taleplere Dön
     </a>
 
-    <!-- Yalnızca Talep Sahibi veya Yönetici Butonları Görebilir -->
-    {% if user == ticket.created_by or user.is_staff %}
-    <div class="btn-group" role="group">
-        <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm">
-            <i class="bi bi-pencil me-1"></i> Talebi Düzenle / Durum Değiştir
-        </a>
-        <a href="{% url 'ticket_delete' ticket.id %}" class="btn btn-outline-danger btn-sm">
-            <i class="bi bi-trash me-1"></i> Talebi Sil
-        </a>
+    <!-- Aksiyon Butonları (Yetki Kontrollü) -->
+    <div class="d-flex gap-2 align-items-center">
+        {% if user.is_staff %}
+            <!-- Yöneticiler hem düzenleyebilir / durum değiştirebilir hem de silebilir -->
+            <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                <i class="bi bi-pencil-square me-1"></i> Talebi Düzenle / Durum Değiştir
+            </a>
+            <a href="{% url 'ticket_delete' ticket.id %}" class="btn btn-outline-danger btn-sm rounded-pill px-3">
+                <i class="bi bi-trash3 me-1"></i> Talebi Sil
+            </a>
+        {% elif user == ticket.created_by %}
+            <!-- Normal Kullanıcı / Talep Sahibi -->
+            {% if ticket.status != 'resolved' and ticket.status != 'closed' %}
+                <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                    <i class="bi bi-pencil me-1"></i> Talebi Düzenle
+                </a>
+            {% else %}
+                <span class="d-inline-block" tabindex="0" data-bs-toggle="tooltip" title="Çözülen veya kapatılan talepler düzenlenemez.">
+                    <button class="btn btn-outline-secondary btn-sm rounded-pill px-3" disabled>
+                        <i class="bi bi-lock me-1"></i> Düzenleme Kapalı
+                    </button>
+                </span>
+            {% endif %}
+        {% endif %}
     </div>
-    {% endif %}
 </div>
 
-
-<!-- Talep Detay Kartı -->
-<div class="card shadow-sm mb-4">
-    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-        <div>
-            <!-- Talep ID, Başlığı ve Gizlilik Rozeti -->
-            <span class="badge bg-dark me-2">{{ ticket.ticket_number }}</span>
-            <h1 class="h4 d-inline fw-bold text-gray-800 me-2">{{ ticket.title }}</h1>
+<!-- Talep Detay Ana Kartı -->
+<div class="card shadow-sm mb-4 border-0 rounded-3">
+    <!-- Kart Başlığı -->
+    <div class="card-header bg-body py-3 px-4 d-flex justify-content-between align-items-center flex-wrap gap-3 border-bottom">
+        <div class="d-flex align-items-center flex-wrap gap-2">
+            <!-- Talep No Rozeti -->
+            <span class="badge bg-dark fs-6 px-3 py-2 rounded-pill font-monospace">{{ ticket.ticket_number }}</span>
+            
+            <!-- Başlık -->
+            <h1 class="h4 d-inline fw-bold text-body mb-0">{{ ticket.title }}</h1>
+            
+            <!-- Gizlilik Rozeti -->
             {% if ticket.is_public %}
-            <span class="badge bg-info text-dark rounded-pill ms-1"><i class="bi bi-globe me-1"></i>Herkese Açık (Topluluk Talebi)</span>
+            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle rounded-pill px-2 py-1">
+                <i class="bi bi-globe me-1"></i>Herkese Açık (Topluluk Talebi)
+            </span>
             {% else %}
-            <span class="badge bg-secondary rounded-pill ms-1"><i class="bi bi-lock-fill me-1"></i>Özel / Gizli Talep</span>
+            <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle rounded-pill px-2 py-1">
+                <i class="bi bi-lock-fill me-1"></i>Özel / Gizli Talep
+            </span>
             {% endif %}
+
+            <!-- Çözüldü Rozeti -->
+            <span id="ticket-solved-badge" class="badge bg-success text-white rounded-pill px-2 py-1 {% if not has_solution and ticket.status != 'resolved' %}d-none{% endif %}">
+                <i class="bi bi-check-circle-fill me-1"></i>Çözüldü
+            </span>
         </div>
 
-        <div>
+        <!-- Öncelik ve Durum Rozetleri -->
+        <div class="d-flex align-items-center gap-2">
             <!-- Öncelik Rozeti -->
             {% if ticket.priority == 'urgent' %}
-            <span class="badge bg-danger fs-6">Acil</span>
+            <span class="badge bg-danger fs-6 px-3 py-2 rounded-pill"><i class="bi bi-fire me-1"></i>Acil</span>
             {% elif ticket.priority == 'high' %}
-            <span class="badge bg-warning text-dark fs-6">Yüksek</span>
+            <span class="badge bg-warning text-dark fs-6 px-3 py-2 rounded-pill"><i class="bi bi-exclamation-triangle me-1"></i>Yüksek</span>
             {% elif ticket.priority == 'medium' %}
-            <span class="badge bg-info text-dark fs-6">Orta</span>
+            <span class="badge bg-info text-dark fs-6 px-3 py-2 rounded-pill"><i class="bi bi-dash-circle me-1"></i>Orta</span>
             {% else %}
-            <span class="badge bg-light text-dark fs-6">Düşük</span>
+            <span class="badge bg-light text-secondary border fs-6 px-3 py-2 rounded-pill"><i class="bi bi-arrow-down me-1"></i>Düşük</span>
             {% endif %}
 
             <!-- Durum Rozeti -->
-            {% if ticket.status == 'open' %}
-            <span class="badge bg-primary fs-6">Açık</span>
-            {% elif ticket.status == 'in_progress' %}
-            <span class="badge bg-warning text-dark fs-6">Devam Ediyor</span>
-            {% elif ticket.status == 'resolved' %}
-            <span class="badge bg-success fs-6">Çözüldü</span>
-            {% else %}
-            <span class="badge bg-secondary fs-6">Kapalı</span>
-            {% endif %}
+            <span id="ticket-status-badge" class="badge fs-6 px-3 py-2 rounded-pill {% if ticket.status == 'open' %}bg-primary{% elif ticket.status == 'in_progress' %}bg-warning text-dark{% elif ticket.status == 'resolved' %}bg-success{% else %}bg-secondary{% endif %}">
+                {% if ticket.status == 'open' %}
+                    <i class="bi bi-record-circle me-1"></i>Açık
+                {% elif ticket.status == 'in_progress' %}
+                    <i class="bi bi-hourglass-split me-1"></i>Devam Ediyor
+                {% elif ticket.status == 'resolved' %}
+                    <i class="bi bi-check2-all me-1"></i>Çözüldü
+                {% else %}
+                    <i class="bi bi-x-circle me-1"></i>Kapalı
+                {% endif %}
+            </span>
         </div>
     </div>
 
-    <div class="card-body">
+    <div class="card-body p-4">
+        <!-- Talebin Üst Bilgileri (Modern ve Dengeli Grid Bar) -->
+        <div class="p-3 bg-body-tertiary rounded-3 border mb-4">
+            <div class="row g-3 align-items-center small">
+                <!-- Oluşturan -->
+                <div class="col-sm-6 col-md-4 col-lg">
+                    <div class="text-body-secondary mb-1">
+                        <i class="bi bi-person-fill text-primary me-1"></i><strong>Oluşturan</strong>
+                    </div>
+                    <div>
+                        <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">{{ ticket.created_by.username }}</span>
+                    </div>
+                </div>
 
-        <!-- Talebin Üst Bilgileri (Kullanıcı, Atanan Yönetici, Kategori, Oluşturulma & Güncellenme Tarihi) -->
-        <div class="row text-muted border-bottom pb-3 mb-3 small">
-            <div class="col-md-3">
-                <i class="bi bi-person me-1"></i><strong>Oluşturan:</strong> {{ ticket.created_by.username }}
-            </div>
-            <div class="col-md-3">
-                <i class="bi bi-person-badge me-1"></i><strong>Atanan Yönetici:</strong> 
-                {% if ticket.assigned_to %}
-                    <span class="badge bg-info text-dark">{{ ticket.assigned_to.username }}</span>
-                {% else %}
-                    <span class="badge bg-light text-muted">Atanmadı</span>
-                {% endif %}
-            </div>
-            <div class="col-md-2">
-                <i class="bi bi-folder me-1"></i><strong>Kategori:</strong>
-                {% if ticket.category %}{{ ticket.category.name }}{% else %}Kategorisiz{% endif %}
-            </div>
-            <div class="col-md-2">
-                <i class="bi bi-clock me-1"></i><strong>Oluşturulma:</strong> {{ ticket.created_at|date:"d.m.Y H:i" }}
-            </div>
-            <div class="col-md-2">
-                <i class="bi bi-arrow-repeat me-1"></i><strong>Son Güncelleme:</strong> {{ ticket.updated_at|date:"d.m.Y H:i" }}
+                <!-- Atanan Yönetici -->
+                <div class="col-sm-6 col-md-4 col-lg">
+                    <div class="text-body-secondary mb-1">
+                        <i class="bi bi-person-badge-fill text-info me-1"></i><strong>Atanan Yönetici</strong>
+                    </div>
+                    <div>
+                        {% if ticket.assigned_to %}
+                            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">{{ ticket.assigned_to.username }}</span>
+                        {% else %}
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">Atanmadı</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Kategori -->
+                <div class="col-sm-6 col-md-4 col-lg">
+                    <div class="text-body-secondary mb-1">
+                        <i class="bi bi-folder-fill text-warning me-1"></i><strong>Kategori</strong>
+                    </div>
+                    <div>
+                        {% if ticket.category %}
+                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">{{ ticket.category.name }}</span>
+                        {% else %}
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">Kategorisiz</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Oluşturulma Tarihi -->
+                <div class="col-sm-6 col-md-4 col-lg">
+                    <div class="text-body-secondary mb-1">
+                        <i class="bi bi-calendar-plus text-success me-1"></i><strong>Oluşturulma</strong>
+                    </div>
+                    <div>
+                        <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle">{{ ticket.created_at|date:"d.m.Y H:i" }}</span>
+                    </div>
+                </div>
+
+                <!-- Son Güncelleme -->
+                <div class="col-sm-6 col-md-4 col-lg">
+                    <div class="text-body-secondary mb-1">
+                        <i class="bi bi-arrow-repeat text-secondary me-1"></i><strong>Son Güncelleme</strong>
+                    </div>
+                    <div>
+                        <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">{{ ticket.updated_at|date:"d.m.Y H:i" }}</span>
+                    </div>
+                </div>
+
+                <!-- SLA Yanıt Durumu -->
+                <div class="col-sm-6 col-md-4 col-lg">
+                    <div class="text-body-secondary mb-1">
+                        <i class="bi bi-stopwatch text-danger me-1"></i><strong>SLA Takibi</strong>
+                    </div>
+                    <div>
+                        {% if ticket.is_sla_breached %}
+                            <span class="badge bg-danger text-white border border-danger shadow-xs" title="SLA süresi aşıldı!">
+                                <i class="bi bi-alarm-fill me-1"></i>SLA Aşıldı ({{ ticket.sla_remaining_text }})
+                            </span>
+                        {% elif ticket.first_response_at %}
+                            <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle" title="İlk yanıt verildi">
+                                <i class="bi bi-check2-circle me-1"></i>{{ ticket.sla_remaining_text }}
+                            </span>
+                        {% elif ticket.status in 'open in_progress' %}
+                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Hedef: {{ ticket.sla_target_hours }} saat içinde ilk yanıt">
+                                <i class="bi bi-hourglass-split me-1"></i>{{ ticket.sla_remaining_text }}
+                            </span>
+                        {% else %}
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                                <i class="bi bi-check-all me-1"></i>Tamamlandı
+                            </span>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- TALEP DOSYA / GÖRSEL EKİ ÖNİZLEMESİ -->
         {% if ticket.attachment %}
-            <div class="mt-3 p-3 bg-light rounded border mb-3">
-                <strong><i class="bi bi-paperclip"></i> Ek Dosya / Görsel:</strong>
-                {% if ticket.attachment.name|lower|slice:"-4:" == ".png" or ticket.attachment.name|lower|slice:"-4:" == ".jpg" or ticket.attachment.name|lower|slice:"-5:" == ".jpeg" %}
-                    <div class="mt-2">
-                        <img src="{{ ticket.attachment.url }}" alt="Ek Görsel" class="img-fluid rounded shadow-sm" style="max-height: 300px;">
+            {% with ext=ticket.attachment.name|lower %}
+            <div class="p-3 bg-body-tertiary rounded-3 border mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong class="text-body"><i class="bi bi-paperclip me-1 text-primary"></i> Ek Dosya / Görsel:</strong>
+                    <a href="{{ ticket.attachment.url }}" target="_blank" download class="btn btn-sm btn-outline-primary rounded-pill px-3">
+                        <i class="bi bi-download me-1"></i> İndir / Görüntüle
+                    </a>
+                </div>
+
+                <!-- Resim ise önizleme göster, değilse dosya kutusu göster -->
+                {% if ".png" in ext or ".jpg" in ext or ".jpeg" in ext or ".webp" in ext or ".gif" in ext or ".svg" in ext %}
+                    <div class="mt-2 text-center p-2 bg-body rounded border">
+                        <a href="{{ ticket.attachment.url }}" target="_blank" title="Tam boyutta açmak için tıklayın">
+                            <img src="{{ ticket.attachment.url }}" alt="Ek Görsel" class="img-fluid rounded shadow-sm border" style="max-height: 380px; object-fit: contain;">
+                        </a>
+                        <div class="small text-muted mt-1"><i class="bi bi-zoom-in me-1"></i>Tam boyutta açmak için görsele tıklayın</div>
                     </div>
                 {% else %}
-                    <div class="mt-2">
-                        <a href="{{ ticket.attachment.url }}" target="_blank" class="btn btn-sm btn-outline-primary">
-                            <i class="bi bi-download"></i> Dosyayı İndir / Görüntüle
-                        </a>
+                    <div class="p-3 bg-body rounded border d-flex align-items-center gap-3 mt-2">
+                        <i class="bi bi-file-earmark-arrow-down fs-1 text-primary"></i>
+                        <div>
+                            <div class="fw-bold text-body text-break">{{ ticket.attachment_filename }}</div>
+                            <small class="text-muted">Bu ek bir belge veya dosya formatındadır.</small>
+                        </div>
                     </div>
                 {% endif %}
             </div>
+            {% endwith %}
         {% endif %}
 
-        <!-- Talebin Açıklaması -->
+        <!-- Talebin Açıklaması (Quill HTML / Metin ve Boşluk Düzeltmesi) -->
         <div class="ticket-description">
-            <h5 class="fw-bold text-secondary mb-2">Talep Açıklaması:</h5>
-            <p class="card-text fs-6 lead text-dark">{{ ticket.description|linebreaks }}</p>
+            <h5 class="fw-bold text-body mb-3 d-flex align-items-center">
+                <i class="bi bi-card-text me-2 text-primary"></i>Talep Açıklaması
+            </h5>
+
+            <!-- Boş/Geçersiz Açıklama Kontrolü (<p><br></p> hatası giderildi) -->
+            {% if ticket.description and ticket.description != '<p><br></p>' and ticket.description != '<p></p>' and ticket.description|striptags|cut:" "|length > 0 %}
+                <div class="p-3 bg-body rounded-3 border ticket-content-box">
+                    {% if "<" in ticket.description and ">" in ticket.description %}
+                        <!-- Quill Rich Text Editor Snow Teması ile Zengin İçerik Sunumu -->
+                        <div class="ql-snow">
+                            <div class="ql-editor p-0 text-body" style="font-size: 1rem; line-height: 1.6;">
+                                {{ ticket.description|safe }}
+                            </div>
+                        </div>
+                    {% else %}
+                        <!-- Düz Metin Biçimlendirmesi -->
+                        <div class="text-body" style="font-size: 1rem; line-height: 1.6;">
+                            {{ ticket.description|linebreaks }}
+                        </div>
+                    {% endif %}
+                </div>
+            {% else %}
+                <div class="alert alert-light-subtle border text-muted d-flex align-items-center py-3 px-3 rounded-3 mb-0">
+                    <i class="bi bi-info-circle fs-5 me-2 text-secondary"></i>
+                    <span>Bu destek talebi için detaylı bir açıklama belirtilmemiş.</span>
+                </div>
+            {% endif %}
         </div>
     </div>
 </div>
 
+<!-- MÜŞTERİ MEMNUNİYET ANKETİ (CSAT RATING) -->
+{% if ticket.status == 'resolved' or has_solution %}
+<div class="card shadow-sm mb-4 border-0 rounded-4 overflow-hidden" id="csat-card" style="background: linear-gradient(135deg, rgba(255, 193, 7, 0.08) 0%, rgba(25, 135, 84, 0.08) 100%); border: 1px solid rgba(255, 193, 7, 0.25) !important;">
+    <div class="card-body p-4">
+        {% if ticket.rating %}
+            <!-- Zaten Değerlendirilmiş -->
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="rounded-circle bg-warning bg-opacity-25 text-warning p-3 d-flex align-items-center justify-content-center" style="width: 50px; height: 50px;">
+                        <i class="bi bi-star-fill fs-4"></i>
+                    </div>
+                    <div>
+                        <h6 class="fw-bold mb-1"><i class="bi bi-award-fill text-warning me-1"></i>Müşteri Memnuniyet Değerlendirmesi</h6>
+                        <div class="text-warning fs-5">
+                            {% for i in "12345" %}
+                                {% if forloop.counter <= ticket.rating.score %}
+                                    <i class="bi bi-star-fill text-warning"></i>
+                                {% else %}
+                                    <i class="bi bi-star text-muted"></i>
+                                {% endif %}
+                            {% endfor %}
+                            <span class="fs-6 fw-bold text-body ms-2">({{ ticket.rating.score }}/5)</span>
+                        </div>
+                        {% if ticket.rating.feedback %}
+                        <p class="text-body-secondary small mb-0 mt-1 fst-italic">"{{ ticket.rating.feedback }}"</p>
+                        {% endif %}
+                    </div>
+                </div>
+                <small class="text-muted"><i class="bi bi-calendar-check me-1"></i>{{ ticket.rating.created_at|date:"d.m.Y H:i" }}</small>
+            </div>
+        {% elif user == ticket.created_by or user.is_superuser %}
+            <!-- Değerlendirme Formu (Talep Sahibi İçin) -->
+            <div id="csat-form-container">
+                <div class="d-flex align-items-start gap-3">
+                    <div class="rounded-circle bg-warning text-dark p-3 d-flex align-items-center justify-content-center flex-shrink-0" style="width: 50px; height: 50px;">
+                        <i class="bi bi-star-fill fs-4"></i>
+                    </div>
+                    <div class="flex-grow-1">
+                        <h5 class="fw-bold mb-1">Destek Deneyiminizi Değerlendirin ⭐</h5>
+                        <p class="text-muted small mb-3">Bu destek talebiniz çözüldü olarak işaretlendi. Destek kalitemizi artırmamız için lütfen deneyiminizi 1-5 yıldız arasında puanlayın.</p>
+                        
+                        <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+                            <span class="small fw-bold text-muted me-2">Puanınız:</span>
+                            <div class="star-rating d-flex gap-1" id="star-container" style="font-size: 1.8rem; cursor: pointer;">
+                                <i class="bi bi-star-fill text-warning star-btn" data-value="1" title="1 - Hiç Memnun Kalmadım"></i>
+                                <i class="bi bi-star-fill text-warning star-btn" data-value="2" title="2 - Memnun Kalmadım"></i>
+                                <i class="bi bi-star-fill text-warning star-btn" data-value="3" title="3 - Orta"></i>
+                                <i class="bi bi-star-fill text-warning star-btn" data-value="4" title="4 - Memnun Kaldım"></i>
+                                <i class="bi bi-star-fill text-warning star-btn" data-value="5" title="5 - Çok Memnun Kaldım"></i>
+                            </div>
+                            <span id="selected-star-label" class="badge bg-warning text-dark ms-2 fw-semibold">⭐⭐⭐⭐⭐ Çok Memnun Kaldım (5/5)</span>
+                        </div>
+
+                        <div class="mb-3" style="max-width: 600px;">
+                            <textarea id="csat-feedback" class="form-control" rows="2" placeholder="Görüş ve önerilerinizi belirtebilirsiniz (isteğe bağlı)..."></textarea>
+                        </div>
+
+                        <button type="button" id="btn-submit-csat" class="btn btn-warning fw-bold rounded-pill px-4" onclick="submitCsatRating()">
+                            <i class="bi bi-send-check me-1"></i> Değerlendirmeyi Gönder
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div id="csat-success-container" class="d-none text-center py-3">
+                <i class="bi bi-check-circle-fill text-success display-6 mb-2 d-block"></i>
+                <h5 class="fw-bold text-success mb-1">Değerlendirmeniz Alındı!</h5>
+                <p class="text-muted small mb-0">Geri bildiriminiz için teşekkür ederiz. Destek kalitemizi geliştirmemize katkı sağladınız.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
 
 <!-- Talep Hareket Geçmişi (Activity Logs / Timeline) -->
-<div class="card shadow-sm mb-4">
-    <div class="card-header bg-white py-3">
-        <h5 class="mb-0 fw-bold text-dark">
+<div class="card shadow-sm mb-4 border-0 rounded-3">
+    <div class="card-header bg-body py-3 px-4 border-bottom d-flex justify-content-between align-items-center">
+        <h5 class="mb-0 fw-bold text-body">
             <i class="bi bi-clock-history me-2 text-primary"></i>Talep Hareket Geçmişi
         </h5>
+        {% if activity_logs %}
+        <span class="badge bg-secondary-subtle text-secondary-emphasis rounded-pill">{{ activity_logs|length }} İşlem</span>
+        {% endif %}
     </div>
     <div class="card-body p-4">
         {% if activity_logs %}
-        <ul class="list-group list-group-flush">
-            {% for log in activity_logs %}
-            <li class="list-group-item d-flex justify-content-between align-items-center bg-transparent px-0 py-2 border-bottom-0">
-                <div>
-                    <i class="bi bi-dot text-primary fs-4 align-middle"></i>
-                    <strong>{% if log.actor %}{{ log.actor.username }}{% else %}Sistem{% endif %}</strong> 
-                    <span class="text-secondary ms-1">{{ log.action }}</span>
-                </div>
-                <small class="text-muted"><i class="bi bi-clock me-1"></i>{{ log.created_at|date:"d.m.Y H:i" }}</small>
-            </li>
-            {% endfor %}
-        </ul>
+        <div class="timeline-container">
+            <ul class="list-group list-group-flush">
+                {% for log in activity_logs %}
+                <li class="list-group-item d-flex justify-content-between align-items-center bg-transparent px-0 py-2 border-bottom border-light-subtle">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-check-circle text-primary me-2"></i>
+                        <div>
+                            <strong>{% if log.actor %}{{ log.actor.username }}{% else %}Sistem{% endif %}</strong> 
+                            <span class="text-body-secondary ms-1">{{ log.action }}</span>
+                        </div>
+                    </div>
+                    <small class="text-muted"><i class="bi bi-clock me-1"></i>{{ log.created_at|date:"d.m.Y H:i" }}</small>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
         {% else %}
-        <div class="text-muted small">Henüz hareket kaydı bulunmuyor.</div>
+        <div class="text-muted small d-flex align-items-center">
+            <i class="bi bi-info-circle me-1"></i>Henüz kaydedilmiş hareket bulunmuyor.
+        </div>
         {% endif %}
     </div>
 </div>
 
-
 <!-- Yorumlar Geçmişi Kartı -->
-<div class="card shadow-sm mb-4">
-    <div class="card-header bg-light py-3">
-        <h5 class="mb-0 fw-bold">
-            <i class="bi bi-chat-left-text me-2"></i>Yorumlar ({{ comments.count }})
+<div class="card shadow-sm mb-4 border-0 rounded-3" id="comments-card">
+    <div class="card-header bg-body py-3 px-4 border-bottom d-flex justify-content-between align-items-center">
+        <h5 class="mb-0 fw-bold text-body">
+            <i class="bi bi-chat-left-text me-2 text-primary"></i>Yorumlar (<span id="total-comments-count">{{ comments.count }}</span>)
         </h5>
     </div>
 
-    <div class="card-body">
-
+    <div class="card-body p-4">
         {% for comment in comments %}
-        <div class="border-bottom pb-3 mb-3 {% if comment.is_internal %}bg-warning-subtle p-3 rounded border-warning{% endif %}">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-                <strong>
-                    <i class="bi bi-person-circle me-1"></i>{{ comment.author.username }}
-                    {% if comment.is_internal %}
-                    <span class="badge bg-warning text-dark ms-2"><i class="bi bi-lock-fill me-1"></i>Gizli İç Not</span>
-                    {% endif %}
-                </strong>
-                <small class="text-muted">{{ comment.created_at|date:"d.m.Y H:i" }}</small>
+        <div id="comment-item-{{ comment.id }}" class="comment-card mb-4 {% if comment.is_solution %}p-3 rounded-3 border border-2 border-success bg-success-subtle shadow-sm{% elif comment.is_internal %}bg-warning-subtle p-3 rounded-3 border border-warning{% else %}p-3 rounded-3 border bg-body{% endif %} transition-all">
+            
+            <!-- Çözüm Rozeti Alanı -->
+            <div class="solution-banner {% if not comment.is_solution %}d-none{% endif %} mb-2">
+                <span class="badge bg-success text-white px-3 py-2 fs-6 rounded-pill shadow-sm">
+                    <i class="bi bi-check-circle-fill me-1"></i>En İyi Yanıt / Onaylanmış Çözüm
+                </span>
             </div>
-            <p class="mb-0 text-dark">{{ comment.content|linebreaks }}</p>
+
+            <!-- Yorum Başlığı (Kullanıcı & Tarih) -->
+            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <strong class="text-body">
+                        <i class="bi bi-person-circle me-1 text-primary"></i>{{ comment.author.username }}
+                    </strong>
+                    {% if comment.author.is_staff %}
+                    <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle rounded-pill small">Yetkili</span>
+                    {% endif %}
+                    {% if comment.author == ticket.created_by %}
+                    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle rounded-pill small">Talep Sahibi</span>
+                    {% endif %}
+                    {% if comment.is_internal %}
+                    <span class="badge bg-warning text-dark rounded-pill ms-1"><i class="bi bi-lock-fill me-1"></i>Gizli İç Not</span>
+                    {% endif %}
+                </div>
+                <small class="text-body-secondary"><i class="bi bi-clock me-1"></i>{{ comment.created_at|date:"d.m.Y H:i" }}</small>
+            </div>
+
+            <!-- Yorum Metni (Geçerli HTML5: div içi linebreaks) -->
+            <div class="comment-content text-body mb-2" style="font-size: 0.95rem; line-height: 1.6;">
+                {{ comment.content|linebreaks }}
+            </div>
 
             <!-- YORUM DOSYA / GÖRSEL EKİ ÖNİZLEMESİ -->
             {% if comment.attachment %}
-            <div class="mt-2">
-                {% if comment.attachment.name|lower|slice:"-4:" == ".png" or comment.attachment.name|lower|slice:"-4:" == ".jpg" or comment.attachment.name|lower|slice:"-5:" == ".jpeg" %}
-                    <img src="{{ comment.attachment.url }}" alt="Yorum Eki" class="img-fluid rounded border shadow-sm" style="max-height: 200px;">
-                {% else %}
-                    <a href="{{ comment.attachment.url }}" target="_blank" class="btn btn-sm btn-outline-secondary">
-                        <i class="bi bi-paperclip"></i> Yorum Ekini İndir / Görüntüle
-                    </a>
+                {% with cext=comment.attachment.name|lower %}
+                <div class="mt-3 p-3 bg-body-tertiary rounded-3 border">
+                    {% if ".png" in cext or ".jpg" in cext or ".jpeg" in cext or ".webp" in cext or ".gif" in cext or ".svg" in cext %}
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="small fw-semibold text-body">
+                                <i class="bi bi-image text-primary me-1"></i>{{ comment.attachment_filename }}
+                            </span>
+                            <a href="{{ comment.attachment.url }}" target="_blank" download class="btn btn-sm btn-outline-primary rounded-pill px-3">
+                                <i class="bi bi-download me-1"></i>İndir
+                            </a>
+                        </div>
+                        <div class="text-center p-2 bg-body rounded border">
+                            <a href="{{ comment.attachment.url }}" target="_blank" title="Tam boyutta açmak için tıklayın">
+                                <img src="{{ comment.attachment.url }}" alt="Yorum Eki" class="img-fluid rounded border shadow-sm" style="max-height: 280px; object-fit: contain;">
+                            </a>
+                            <div class="small text-muted mt-1"><i class="bi bi-zoom-in me-1"></i>Tam boyutta açmak için görsele tıklayın</div>
+                        </div>
+                    {% else %}
+                        <div class="p-3 bg-body rounded-3 border d-flex align-items-center justify-content-between flex-wrap gap-2">
+                            <div class="d-flex align-items-center">
+                                {% if ".pdf" in cext %}
+                                    <i class="bi bi-file-earmark-pdf-fill text-danger fs-2 me-3"></i>
+                                {% elif ".zip" in cext %}
+                                    <i class="bi bi-file-earmark-zip-fill text-warning fs-2 me-3"></i>
+                                {% elif ".log" in cext or ".txt" in cext %}
+                                    <i class="bi bi-file-earmark-text-fill text-info fs-2 me-3"></i>
+                                {% else %}
+                                    <i class="bi bi-file-earmark-arrow-down-fill text-primary fs-2 me-3"></i>
+                                {% endif %}
+                                <div>
+                                    <strong class="text-body text-break d-block mb-1">{{ comment.attachment_filename }}</strong>
+                                    {% if ".pdf" in cext %}
+                                        <span class="badge bg-danger-subtle text-danger border border-danger-subtle small">PDF Belgesi</span>
+                                    {% elif ".zip" in cext %}
+                                        <span class="badge bg-warning-subtle text-warning border border-warning-subtle small">ZIP Arşivi</span>
+                                    {% elif ".log" in cext %}
+                                        <span class="badge bg-info-subtle text-info border border-info-subtle small">LOG Dosyası</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle small">Ek Belge</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div>
+                                <a href="{{ comment.attachment.url }}" target="_blank" download class="btn btn-sm btn-outline-primary rounded-pill px-3 fw-semibold">
+                                    <i class="bi bi-download me-1"></i>İndir / Görüntüle
+                                </a>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+                {% endwith %}
+            {% endif %}
+
+            <!-- YORUM ETKİLEŞİM VE ÇÖZÜM BUTONLARI -->
+            <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top border-secondary-subtle">
+                <!-- Faydalı (Beğen) Butonu - AJAX Desteği ile Kesintisiz Çalışır -->
+                <div>
+                    <button type="button" 
+                            data-url="{% url 'toggle_comment_like' comment.id %}" 
+                            data-comment-id="{{ comment.id }}"
+                            class="btn btn-sm btn-like-ajax {% if request.user in comment.likes.all %}btn-primary{% else %}btn-outline-secondary{% endif %} rounded-pill px-3">
+                        <i class="bi bi-hand-thumbs-up-fill me-1"></i>Faydalı (<span class="like-count">{{ comment.like_count }}</span>)
+                    </button>
+                </div>
+
+                <!-- Çözüm İşaretleme Butonu (Sadece Talep Sahibi veya Yönetici Görebilir) -->
+                {% if request.user == ticket.created_by or request.user.is_staff %}
+                <div>
+                    <button type="button"
+                            data-url="{% url 'toggle_comment_solution' comment.id %}"
+                            data-comment-id="{{ comment.id }}"
+                            class="btn btn-sm btn-solution-ajax rounded-pill px-3 {% if comment.is_solution %}btn-outline-danger{% else %}btn-outline-success{% endif %}"
+                            title="{% if comment.is_solution %}Çözüm işaretini kaldır{% else %}Bu yanıtı çözüm olarak işaretle{% endif %}">
+                        {% if comment.is_solution %}
+                            <i class="bi bi-x-circle me-1"></i>Çözüm İşaretini Kaldır
+                        {% else %}
+                            <i class="bi bi-check-circle me-1"></i>Çözüm Olarak İşaretle ✅
+                        {% endif %}
+                    </button>
+                </div>
                 {% endif %}
             </div>
-            {% endif %}
+
         </div>
         {% empty %}
 
-        <div class="text-center py-3 text-muted">
-            <i class="bi bi-chat-square-dots display-6 d-block mb-2"></i>
-            Bu talebe henüz hiç yorum yapılmamış. İlk yorumu aşağıdan ekleyebilirsiniz.
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-chat-square-dots display-4 d-block mb-3 text-secondary-emphasis opacity-50"></i>
+            <h6 class="fw-semibold text-body">Henüz hiç yanıt yapılmamış</h6>
+            <p class="small text-muted mb-0">İlk yanıtı veya bilgilendirmeyi aşağıdaki formu kullanarak ekleyebilirsiniz.</p>
         </div>
         {% endfor %}
     </div>
 </div>
 
 <!-- Yeni Yorum Ekleme Kartı -->
-<div class="card shadow-sm mb-4">
-    <div class="card-header bg-white py-3">
-        <h5 class="mb-0 fw-bold text-dark">
-            <i class="bi bi-reply-fill me-2"></i>Yanıt Ekleyin
+<div class="card shadow-sm mb-4 border-0 rounded-3">
+    <div class="card-header bg-body py-3 px-4 border-bottom">
+        <h5 class="mb-0 fw-bold text-body">
+            <i class="bi bi-reply-fill me-2 text-primary"></i>Yanıt Ekleyin
         </h5>
     </div>
     <div class="card-body p-4">
+        <!-- Eğer talep kapalıysa bilgilendirme kutusu göster -->
+        {% if ticket.status == 'closed' %}
+        <div class="alert alert-warning d-flex align-items-center mb-3 rounded-3" role="alert">
+            <i class="bi bi-exclamation-triangle-fill fs-5 me-2"></i>
+            <div>Bu destek talebi şu an <strong>Kapalı</strong> durumdadır. Yeni bir yorum eklediğinizde talep tekrar incelemeye alınabilir.</div>
+        </div>
+        {% endif %}
+
         <form method="POST" enctype="multipart/form-data">
             {% csrf_token %}
             <div class="mb-3">
-                <label for="{{ comment_form.content.id_for_label }}" class="form-label fw-bold">
+                <label for="{{ comment_form.content.id_for_label }}" class="form-label fw-bold text-body">
                     {{ comment_form.content.label }}
                 </label>
                 {{ comment_form.content }}
@@ -213,33 +527,275 @@
 
             <!-- YORUM DOSYA EKLENTİSİ ALANI -->
             <div class="mb-3">
-                <label for="{{ comment_form.attachment.id_for_label }}" class="form-label fw-bold">
+                <label for="{{ comment_form.attachment.id_for_label }}" class="form-label fw-bold text-body">
                     {{ comment_form.attachment.label }}
                 </label>
                 {{ comment_form.attachment }}
                 {% if comment_form.attachment.errors %}
                 <div class="text-danger small mt-1">{{ comment_form.attachment.errors }}</div>
                 {% endif %}
+                <div class="form-text text-muted d-flex flex-wrap align-items-center gap-2 mt-1 small">
+                    <span class="badge bg-secondary-subtle text-secondary border"><i class="bi bi-shield-check me-1 text-success"></i>Maks 10 MB</span>
+                    <span>İzin verilenler: <code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.pdf</code>, <code>.zip</code>, <code>.log</code></span>
+                </div>
             </div>
 
             <!-- GİZLİ İÇ NOT ONAY KUTUSU (SADECE YÖNETİCİLER GÖRÜR) -->
             {% if 'is_internal' in comment_form.fields %}
-            <div class="form-check mb-3">
+            <div class="form-check mb-4 p-3 bg-warning-subtle rounded-3 border border-warning">
                 {{ comment_form.is_internal }}
-                <label for="{{ comment_form.is_internal.id_for_label }}" class="form-check-label text-warning-emphasis fw-bold ms-1">
+                <label for="{{ comment_form.is_internal.id_for_label }}" class="form-check-label text-warning-emphasis fw-bold ms-2">
                     <i class="bi bi-lock-fill me-1"></i>{{ comment_form.is_internal.label }}
                 </label>
+                <div class="small text-muted ms-4">Bu kutuyu işaretlerseniz yorum yalnızca yöneticiler tarafından görülecektir.</div>
             </div>
             {% endif %}
 
             <div class="d-flex justify-content-end">
-                <button type="submit" class="btn btn-primary px-4">
-                    <i class="bi bi-send me-1"></i> Yorumu Gönder
+                <button type="submit" class="btn btn-primary px-4 py-2 rounded-pill fw-semibold">
+                    <i class="bi bi-send-fill me-1"></i> Yorumu Gönder
                 </button>
             </div>
         </form>
     </div>
 </div>
 
+<!-- AJAX ile Kesintisiz Beğeni (Like) ve Çözüm (Solution) Yönetimi JavaScript -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // Bootstrap Tooltipleri etkinleştir
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
 
+    // 1. AJAX Beğeni (Like) İşlemleri
+    document.querySelectorAll('.btn-like-ajax').forEach(function (button) {
+        button.addEventListener('click', function (e) {
+            e.preventDefault();
+            const url = this.getAttribute('data-url');
+            const btn = this;
+            const countSpan = btn.querySelector('.like-count');
+
+            btn.disabled = true;
+
+            fetch(url, {
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Ağ hatası oluştu');
+                return response.json();
+            })
+            .then(data => {
+                btn.disabled = false;
+                if (data.status === 'ok') {
+                    if (countSpan) countSpan.textContent = data.like_count;
+                    if (data.liked) {
+                        btn.classList.remove('btn-outline-secondary');
+                        btn.classList.add('btn-primary');
+                    } else {
+                        btn.classList.remove('btn-primary');
+                        btn.classList.add('btn-outline-secondary');
+                    }
+                    // Mikro animasyon
+                    btn.style.transform = 'scale(1.1)';
+                    setTimeout(() => { btn.style.transform = 'scale(1)'; }, 150);
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                // Fallback: Normal URL yönlendirmesi yap
+                window.location.href = url;
+            });
+        });
+    });
+
+    // 2. AJAX Çözüm (Solution) İşaretleme İşlemleri
+    document.querySelectorAll('.btn-solution-ajax').forEach(function (button) {
+        button.addEventListener('click', function (e) {
+            e.preventDefault();
+            const url = this.getAttribute('data-url');
+            const commentId = this.getAttribute('data-comment-id');
+            const btn = this;
+
+            btn.disabled = true;
+
+            fetch(url, {
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Ağ hatası');
+                return response.json();
+            })
+            .then(data => {
+                btn.disabled = false;
+                if (data.status === 'ok') {
+                    // Tüm yorum kartlarının çözüm rozetlerini ve kenarlıklarını temizle
+                    document.querySelectorAll('.comment-card').forEach(function (card) {
+                        card.classList.remove('border-success', 'border-2', 'bg-success-subtle', 'shadow-sm');
+                        if (!card.classList.contains('bg-warning-subtle')) {
+                            card.classList.add('bg-body');
+                        }
+                        const banner = card.querySelector('.solution-banner');
+                        if (banner) banner.classList.add('d-none');
+                    });
+
+                    // Tüm çözüm butonlarını varsayılana sıfırla
+                    document.querySelectorAll('.btn-solution-ajax').forEach(function (b) {
+                        b.classList.remove('btn-outline-danger');
+                        b.classList.add('btn-outline-success');
+                        b.innerHTML = '<i class="bi bi-check-circle me-1"></i>Çözüm Olarak İşaretle ✅';
+                        b.title = 'Bu yanıtı çözüm olarak işaretle';
+                    });
+
+                    // Eğer şu anki yorum çözüm olduysa:
+                    const currentCard = document.getElementById('comment-item-' + commentId);
+                    if (data.is_solution && currentCard) {
+                        currentCard.classList.remove('bg-body');
+                        currentCard.classList.add('border-success', 'border-2', 'bg-success-subtle', 'shadow-sm');
+                        const banner = currentCard.querySelector('.solution-banner');
+                        if (banner) banner.classList.remove('d-none');
+
+                        btn.classList.remove('btn-outline-success');
+                        btn.classList.add('btn-outline-danger');
+                        btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Çözüm İşaretini Kaldır';
+                        btn.title = 'Çözüm işaretini kaldır';
+                    }
+
+                    // Üst kısımdaki "Çözüldü" rozetini güncelle
+                    const solvedBadge = document.getElementById('ticket-solved-badge');
+                    if (solvedBadge) {
+                        if (data.has_solution || data.ticket_status === 'resolved') {
+                            solvedBadge.classList.remove('d-none');
+                        } else {
+                            solvedBadge.classList.add('d-none');
+                        }
+                    }
+
+                    // Üst kısımdaki genel Talep Durumu rozetini dinamik güncelle
+                    const statusBadge = document.getElementById('ticket-status-badge');
+                    if (statusBadge && data.ticket_status) {
+                        if (data.ticket_status === 'resolved') {
+                            statusBadge.className = 'badge fs-6 px-3 py-2 rounded-pill bg-success';
+                            statusBadge.innerHTML = '<i class="bi bi-check2-all me-1"></i>Çözüldü';
+                        } else if (data.ticket_status === 'in_progress') {
+                            statusBadge.className = 'badge fs-6 px-3 py-2 rounded-pill bg-warning text-dark';
+                            statusBadge.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Devam Ediyor';
+                        } else if (data.ticket_status === 'open') {
+                            statusBadge.className = 'badge fs-6 px-3 py-2 rounded-pill bg-primary';
+                            statusBadge.innerHTML = '<i class="bi bi-record-circle me-1"></i>Açık';
+                        }
+                    }
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                window.location.href = url;
+            });
+        });
+    });
+
+    // CSAT Müşteri Memnuniyeti Anketi JS
+    let currentScore = 5;
+    const starBtns = document.querySelectorAll('.star-btn');
+    const starLabel = document.getElementById('selected-star-label');
+    const labels = {
+        1: '⭐ Hiç Memnun Kalmadım (1/5)',
+        2: '⭐⭐ Memnun Kalmadım (2/5)',
+        3: '⭐⭐⭐ Orta (3/5)',
+        4: '⭐⭐⭐⭐ Memnun Kaldım (4/5)',
+        5: '⭐⭐⭐⭐⭐ Çok Memnun Kaldım (5/5)'
+    };
+
+    if (starBtns && starBtns.length > 0) {
+        starBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                currentScore = parseInt(this.getAttribute('data-value'));
+                updateStarDisplay(currentScore);
+            });
+            btn.addEventListener('mouseenter', function() {
+                const val = parseInt(this.getAttribute('data-value'));
+                updateStarDisplay(val);
+            });
+        });
+
+        const starContainer = document.getElementById('star-container');
+        if (starContainer) {
+            starContainer.addEventListener('mouseleave', function() {
+                updateStarDisplay(currentScore);
+            });
+        }
+    }
+
+    function updateStarDisplay(score) {
+        if (!starBtns) return;
+        starBtns.forEach(b => {
+            const val = parseInt(b.getAttribute('data-value'));
+            if (val <= score) {
+                b.classList.remove('bi-star', 'text-muted');
+                b.classList.add('bi-star-fill', 'text-warning');
+            } else {
+                b.classList.remove('bi-star-fill', 'text-warning');
+                b.classList.add('bi-star', 'text-muted');
+            }
+        });
+        if (starLabel && labels[score]) {
+            starLabel.textContent = labels[score];
+        }
+    }
+
+    window.submitCsatRating = function() {
+        const feedbackEl = document.getElementById('csat-feedback');
+        const feedback = feedbackEl ? feedbackEl.value : '';
+        const btn = document.getElementById('btn-submit-csat');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Gönderiliyor...';
+        }
+
+        const formData = new FormData();
+        formData.append('score', currentScore);
+        formData.append('feedback', feedback);
+
+        fetch("{% url 'ticket_rate_api' ticket.id %}", {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                const formBox = document.getElementById('csat-form-container');
+                const successBox = document.getElementById('csat-success-container');
+                if (formBox) formBox.classList.add('d-none');
+                if (successBox) successBox.classList.remove('d-none');
+            } else {
+                alert(data.message || 'Değerlendirme kaydedilemedi.');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-send-check me-1"></i> Değerlendirmeyi Gönder';
+                }
+            }
+        })
+        .catch(() => {
+            alert('İşlem sırasında bir hata oluştu.');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-send-check me-1"></i> Değerlendirmeyi Gönder';
+            }
+        });
+    };
+});
+</script>
 {% endblock %}

@@ -1,0 +1,106 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ article.title }} - Bilgi Bankası{% endblock %}
+
+{% block content %}
+<!-- BREADCRUMB -->
+<nav aria-label="breadcrumb" class="mb-4">
+    <ol class="breadcrumb small">
+        <li class="breadcrumb-item"><a href="{% url 'ticket_list' %}" class="text-decoration-none">Ana Sayfa</a></li>
+        <li class="breadcrumb-item"><a href="{% url 'knowledge_base' %}" class="text-decoration-none">Bilgi Bankası</a></li>
+        <li class="breadcrumb-item active" aria-current="page">{{ article.title|truncatechars:40 }}</li>
+    </ol>
+</nav>
+
+<div class="row g-4">
+    <!-- ANA MAKALE İÇERİĞİ -->
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm rounded-4 p-4 p-md-5">
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+                <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-3 py-1">
+                    {{ article.get_category_display }}
+                </span>
+                <span class="text-muted small">
+                    <i class="bi bi-calendar3 me-1"></i>Son Güncelleme: {{ article.updated_at|date:"d F Y H:i" }}
+                </span>
+                <span class="text-muted small ms-auto">
+                    <i class="bi bi-eye-fill me-1"></i>{{ article.views_count }} görüntülenme
+                </span>
+            </div>
+
+            <h1 class="h2 fw-bold text-gray-800 mb-4">{{ article.title }}</h1>
+
+            <div class="article-content fs-6 lh-lg text-body mb-5" style="white-space: pre-line;">
+                {{ article.content }}
+            </div>
+
+            {% if article.keywords %}
+            <div class="pt-3 border-top mb-4">
+                <small class="text-muted fw-semibold me-2"><i class="bi bi-tags me-1"></i>Etiketler:</small>
+                {% for tag in article.keywords.split %}
+                <span class="badge bg-secondary-subtle text-dark me-1 mb-1">{{ tag }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- YARDIMCI OLDU MU KUTUSU -->
+            <div class="card bg-body-tertiary border-0 rounded-3 p-3 text-center">
+                <p class="fw-semibold mb-2">Bu makale sorununuzu çözmede yardımcı oldu mu?</p>
+                <div class="d-flex justify-content-center gap-2" id="feedbackActions">
+                    <button class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="handleKbFeedback(true)">
+                        <i class="bi bi-hand-thumbs-up me-1"></i> Evet, Çözüldü
+                    </button>
+                    <a href="{% url 'ticket_create' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                        <i class="bi bi-question-circle me-1"></i> Hayır, Destek Talebi Aç
+                    </a>
+                </div>
+                <div id="feedbackResult" class="text-success small fw-semibold mt-2 d-none">
+                    <i class="bi bi-check-circle-fill me-1"></i>Geri bildiriminiz için teşekkür ederiz!
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- YAN PANEL (İLGİLİ MAKALELER & DESTEK) -->
+    <div class="col-lg-4">
+        <!-- İLGİLİ MAKALELER -->
+        {% if related_articles %}
+        <div class="card border-0 shadow-sm rounded-4 p-4 mb-4">
+            <h6 class="fw-bold mb-3"><i class="bi bi-bookmark-star-fill text-warning me-2"></i>İlgili Makaleler</h6>
+            <div class="list-group list-group-flush">
+                {% for item in related_articles %}
+                <a href="{% url 'knowledge_base_detail' item.id %}" class="list-group-item list-group-item-action px-0 py-2 border-0">
+                    <div class="fw-semibold text-primary small mb-1">{{ item.title }}</div>
+                    <small class="text-muted d-block text-truncate">{{ item.content|striptags|truncatewords:10 }}</small>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- DOĞRUDAN DESTEK KARTI -->
+        <div class="card border-0 shadow-sm rounded-4 p-4 bg-primary text-white">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <i class="bi bi-chat-square-text-fill fs-2"></i>
+                <div>
+                    <h6 class="fw-bold mb-0">Hala sorununuz var mı?</h6>
+                    <small class="opacity-75">Uzman ekibimiz size yardımcı olsun</small>
+                </div>
+            </div>
+            <p class="small opacity-75 mb-3">
+                Detaylı inceleme gerektiren durumlarda hemen yeni bir destek talebi başlatabilirsiniz.
+            </p>
+            <a href="{% url 'ticket_create' %}" class="btn btn-light text-primary fw-bold rounded-pill w-100">
+                <i class="bi bi-plus-circle me-1"></i> Yeni Talep Aç
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+function handleKbFeedback(isHelpful) {
+    document.getElementById('feedbackActions').classList.add('d-none');
+    document.getElementById('feedbackResult').classList.remove('d-none');
+}
+</script>
+{% endblock %}

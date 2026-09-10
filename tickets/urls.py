@@ -1,4 +1,5 @@
 from django.urls import path
+from django.contrib.auth import views as auth_views
 from . import views
 
 urlpatterns = [
@@ -18,6 +19,25 @@ urlpatterns = [
     path('login/', views.login_user, name='login'),
     path('logout/', views.logout_user, name='logout'),
     path('verify-email/', views.verify_email, name='verify_email'),
+
+    # Şifre Sıfırlama (Password Reset) Akışı
+    path('password-reset/', auth_views.PasswordResetView.as_view(
+        template_name='tickets/password_reset_form.html',
+        email_template_name='tickets/password_reset_email.html',
+        subject_template_name='tickets/password_reset_subject.txt',
+        success_url='/password-reset/done/'
+    ), name='password_reset'),
+    path('password-reset/done/', auth_views.PasswordResetDoneView.as_view(
+        template_name='tickets/password_reset_done.html'
+    ), name='password_reset_done'),
+    path('reset/<uidb64>/<token>/', auth_views.PasswordResetConfirmView.as_view(
+        template_name='tickets/password_reset_confirm.html',
+        success_url='/reset/done/'
+    ), name='password_reset_confirm'),
+    path('reset/done/', auth_views.PasswordResetCompleteView.as_view(
+        template_name='tickets/password_reset_complete.html'
+    ), name='password_reset_complete'),
+
     path('dashboard/', views.admin_dashboard_view, name='admin_dashboard'), # Yönetici Dashboard'u
     path('notifications/', views.notifications_list_view, name='notifications_list'),
     path('notifications/<int:pk>/read/', views.mark_notification_as_read, name='mark_notification_read'),
@@ -32,10 +52,17 @@ urlpatterns = [
     path('team-chat/create-group/', views.create_chat_group_view, name='create_chat_group'),
     path('team-chat/api/messages/<str:chat_type>/<int:chat_id>/', views.get_chat_messages_api, name='get_chat_messages_api'),
 
+    # Yorum Çözüm ve Beğeni İşlemleri
+    path('comment/<int:comment_id>/solution/', views.toggle_comment_solution, name='toggle_comment_solution'),
+    path('comment/<int:comment_id>/like/', views.toggle_comment_like, name='toggle_comment_like'),
 
+    # Bilgi Bankası (Knowledge Base / FAQ) ve Canlı Öneri API'si
+    path('knowledge-base/', views.knowledge_base_list_view, name='knowledge_base'),
+    path('knowledge-base/<int:pk>/', views.knowledge_base_detail_view, name='knowledge_base_detail'),
+    path('api/kb/suggest/', views.kb_suggest_api, name='kb_suggest_api'),
 
-
-
+    # Müşteri Memnuniyet Anketi (CSAT) Değerlendirme API'si
+    path('ticket/<int:ticket_id>/rate/', views.submit_ticket_rating_api, name='ticket_rate_api'),
 ]
 
 

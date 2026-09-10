@@ -47,6 +47,21 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
                         {% if form.title.errors %}
                         <div class="text-danger small mt-1">{{ form.title.errors }}</div>
                         {% endif %}
+
+                        <!-- Başlık Canlı SSS / Bilgi Bankası Öneri Kutusu -->
+                        <div id="kbSuggestionsBox" class="card border border-primary-subtle bg-primary-subtle bg-opacity-10 mt-2 mb-0 d-none rounded-3 shadow-sm">
+                            <div class="card-body p-3">
+                                <div class="d-flex align-items-center justify-content-between mb-2">
+                                    <span class="fw-bold text-primary small">
+                                        <i class="bi bi-lightbulb-fill text-warning me-1"></i> Bu makaleler veya çözülmüş talepler işinize yarayabilir mi?
+                                    </span>
+                                    <button type="button" class="btn-close btn-close-sm" onclick="document.getElementById('kbSuggestionsBox').classList.add('d-none')" aria-label="Kapat"></button>
+                                </div>
+                                <div id="kbSuggestionsList" class="list-group list-group-flush rounded-2 gap-1">
+                                    <!-- Dinamik AJAX sonuçları buraya gelecek -->
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Kategori, Öncelik, Durum, Atanan Yönetici -->
@@ -93,18 +108,19 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
                         {% endif %}
                     </div>
 
-                    <!-- Detaylı Açıklama -->
+                    <!-- Detaylı Açıklama (Quill Rich Text Editor) -->
                     <div class="mb-3">
                         <label for="{{ form.description.id_for_label }}" class="form-label fw-bold">
                             {{ form.description.label }}
                         </label>
-                        {{ form.description }}
+                        <div id="quill-editor" style="height: 200px;" class="bg-body rounded-bottom"></div>
+                        <textarea name="{{ form.description.name }}" id="{{ form.description.id_for_label }}" class="d-none">{{ form.description.value|default:'' }}</textarea>
                         {% if form.description.errors %}
                         <div class="text-danger small mt-1">{{ form.description.errors }}</div>
                         {% endif %}
                     </div>
 
-                    <!-- Dosya / Görsel Eki (EKLENDİ) -->
+                    <!-- Dosya / Görsel Eki -->
                     <div class="mb-4">
                         <label for="{{ form.attachment.id_for_label }}" class="form-label fw-bold">
                             {{ form.attachment.label }}
@@ -113,24 +129,25 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
                         {% if form.attachment.errors %}
                         <div class="text-danger small mt-1">{{ form.attachment.errors }}</div>
                         {% endif %}
-                        <div class="form-text text-muted">Ekran görüntüsü (PNG, JPG) veya doküman (PDF, LOG) ekleyebilirsiniz.</div>
+                        <div class="form-text text-muted d-flex flex-wrap align-items-center gap-2 mt-1">
+                            <span class="badge bg-secondary-subtle text-secondary border"><i class="bi bi-shield-check me-1 text-success"></i>Maks 10 MB</span>
+                            <span>İzin verilenler: <code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.pdf</code>, <code>.zip</code>, <code>.log</code></span>
+                        </div>
                     </div>
 
                     <!-- Topluluk / Forum Gizlilik Seçeneği -->
                     <div class="card bg-light border-0 p-3 mb-4 rounded-3 text-start">
-                        <div class="form-check form-switch mb-1 d-flex align-items-center justify-content-start">
+                        <div class="d-flex align-items-center mb-2">
                             {{ form.is_public }}
                             <label class="form-check-label fw-bold text-dark ms-2 mb-0" for="{{ form.is_public.id_for_label }}">
                                 🌐 Herkese Açık (Topluluk / Forum Talebi Yap)
                             </label>
                         </div>
-                        <div class="form-text text-muted small mt-1 ms-0">
+                        <div class="form-text text-muted small ms-0">
                             İşaretlerseniz bu talep ve cevabı tüm kullanıcılar tarafından Soru-Cevap (Forum) gibi okunabilir. İşaretlemezseniz özel kalır (sadece siz ve yetkililer görür).
                         </div>
                     </div>
 
- 
-                    </div>
                     <!-- Kaydet ve İptal Butonları -->
                     <div class="d-grid gap-2 d-md-flex justify-content-md-end">
                         {% if ticket %}
@@ -150,4 +167,85 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
         </div>
     </div>
 </div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const textarea = document.getElementById('{{ form.description.id_for_label }}');
+        const quill = new Quill('#quill-editor', {
+            theme: 'snow',
+            placeholder: 'Yaşadığınız sorunu detaylıca açıklayınız...',
+            modules: {
+                toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                    ['blockquote', 'code-block'],
+                    ['clean']
+                ]
+            }
+        });
+
+        if (textarea.value) {
+            quill.root.innerHTML = textarea.value;
+        }
+
+        const form = textarea.closest('form');
+        form.addEventListener('submit', function () {
+            // Eğer editörde sadece boşluk varsa (<p><br></p>), temiz boş değer kaydet
+            if (quill.getText().trim().length === 0) {
+                textarea.value = '';
+            } else {
+                textarea.value = quill.root.innerHTML;
+            }
+        });
+
+        // Canlı SSS / Benzer Talep Öneri Sistemi
+        const titleInput = document.getElementById('{{ form.title.id_for_label }}');
+        const suggestionsBox = document.getElementById('kbSuggestionsBox');
+        const suggestionsList = document.getElementById('kbSuggestionsList');
+        let debounceTimer = null;
+
+        if (titleInput && suggestionsBox && suggestionsList) {
+            titleInput.addEventListener('input', function () {
+                clearTimeout(debounceTimer);
+                const query = this.value.trim();
+                if (query.length < 3) {
+                    suggestionsBox.classList.add('d-none');
+                    suggestionsList.innerHTML = '';
+                    return;
+                }
+
+                debounceTimer = setTimeout(() => {
+                    fetch(`/api/kb/suggest/?q=${encodeURIComponent(query)}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.suggestions && data.suggestions.length > 0) {
+                                let html = '';
+                                data.suggestions.forEach(item => {
+                                    const badgeClass = item.type === 'kb' ? 'bg-primary-subtle text-primary border border-primary-subtle' : 'bg-success-subtle text-success border border-success-subtle';
+                                    html += `
+                                        <a href="${item.url}" target="_blank" class="list-group-item list-group-item-action p-2 rounded border bg-white text-decoration-none shadow-xs">
+                                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                                <strong class="text-primary small"><i class="bi bi-box-arrow-up-right me-1"></i>${item.title}</strong>
+                                                <span class="badge ${badgeClass} small" style="font-size: 0.65rem;">${item.type_display}</span>
+                                            </div>
+                                            <div class="text-muted small text-truncate" style="font-size: 0.75rem;">${item.snippet}</div>
+                                        </a>
+                                    `;
+                                });
+                                suggestionsList.innerHTML = html;
+                                suggestionsBox.classList.remove('d-none');
+                            } else {
+                                suggestionsBox.classList.add('d-none');
+                                suggestionsList.innerHTML = '';
+                            }
+                        })
+                        .catch(() => {
+                            suggestionsBox.classList.add('d-none');
+                        });
+                }, 300);
+            });
+        }
+    });
+</script>
 {% endblock %}

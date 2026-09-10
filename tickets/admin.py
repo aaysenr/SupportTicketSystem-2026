@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Category, Ticket, TicketComment
+from .models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating
 
 #from django.contrib import admin: Django'nun yönetim paneli araçlarını projeye dahil eder.
 #from .models import ...: Aynı klasördeki (.) models.py dosyasından hazırladığımız 3 modeli içe aktarır.
@@ -65,3 +65,53 @@ class TicketCommentAdmin(admin.ModelAdmin):
     #Yorum içeriği üzerinden arama yapar.
     list_filter = ('created_at',)
     #Yorumların tarihine göre filtreleme yapma imkanı sunar.    
+
+
+# 4. Kullanıcı Profili ve Rol Yönetimi (RBAC)
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'role', 'get_categories')
+    list_filter = ('role',)
+    search_fields = ('user__username', 'user__email')
+    filter_horizontal = ('assigned_categories',)
+
+    def get_categories(self, obj):
+        cats = [c.name for c in obj.assigned_categories.all()]
+        return ", ".join(cats) if cats else "-"
+    get_categories.short_description = "Sorumlu Kategoriler"
+
+
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.models import User
+
+class UserProfileInline(admin.StackedInline):
+    model = UserProfile
+    can_delete = False
+    verbose_name_plural = 'Kullanıcı Rolü ve Departman Yetkisi (RBAC)'
+    filter_horizontal = ('assigned_categories',)
+
+# Django varsayılan User admin'ini genişletiyoruz
+try:
+    admin.site.unregister(User)
+except admin.sites.NotRegistered:
+    pass
+
+@admin.register(User)
+class UserAdmin(BaseUserAdmin):
+    inlines = (UserProfileInline,)
+
+
+@admin.register(KnowledgeBaseArticle)
+class KnowledgeBaseArticleAdmin(admin.ModelAdmin):
+    list_display = ('title', 'category', 'views_count', 'is_published', 'created_at')
+    list_filter = ('category', 'is_published', 'created_at')
+    search_fields = ('title', 'content', 'keywords')
+    list_editable = ('is_published',)
+
+
+@admin.register(TicketRating)
+class TicketRatingAdmin(admin.ModelAdmin):
+    list_display = ('ticket', 'user', 'score', 'created_at')
+    list_filter = ('score', 'created_at')
+    search_fields = ('ticket__title', 'user__username', 'feedback')
+

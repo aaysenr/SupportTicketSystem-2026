@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from .models import Ticket, TicketComment # Formun hangi veritabanı tablosunu temel alacağını belirtmek için Ticket ve TicketComment modelini içe aktarır.
 from django.contrib.auth.forms import UserCreationForm 
 from captcha.fields import CaptchaField 
+from .validators import validate_file_security
 
 class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından türeyen bir form sınıfı tanımlar. Bu sayede Ticket modelindeki alanları otomatik olarak bir web formuna dönüştürür.
     """
@@ -29,32 +30,17 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
  
    
     
+    def clean_attachment(self):
+        attachment = self.cleaned_data.get('attachment')
+        if attachment:
+            validate_file_security(attachment)
+        return attachment
+
     class Meta: # Django'ya bu formun hangi modeli kullanacağını ve hangi alanları göstereceğini bildirir
         model = Ticket # Formun Ticket veritabanı tablosundan türetileceğini belirtir.
         # Formda kullanıcının doldurmasını istediğimiz alanlar:
         
         fields = ['title', 'category', 'priority', 'status', 'assigned_to', 'is_public', 'description', 'attachment']
-
-
-        # Form alanlarının HTML görünümünü ve davranışlarını (placeholder, class, rows vb.) tanımlar.
-        # ModelForm içindeki Meta sınıfında tanımlanan bu bölüm,
-        # formun hangi modelden veri çekeceğini, hangi alanların görünür olacağını
-        # ve bu alanların HTML görsel ayarlarını (widgets, labels vb.) belirtir.
-
-
-        #class Meta: Formun hangi modeli referans alacağını ve hangi kurallarla çalışacağını belirten ayar bloğudur.
-
-        #model = Ticket: Formun bağlanacağı veritabanı modelini seçer.
-
-        #fields = [...]: Kullanıcının formda hangi alanları doldurmasını istediğimizi belirler.
-
-        #Neden created_by, status, created_at yok? Çünkü created_by alanını güvenlik gereği giriş yapan kullanıcıdan (request.user) arka planda otomatik alacağız, 
-        # status alanını varsayılan olarak "Açık" başlatacağız ve created_at zaten otomatik tarih atıyor. 
-        # Kullanıcının bunları değiştirmesini istemeyiz!
-        
-
-
-
 
         # Form elemanlarına Bootstrap CSS sınıfları ve etiketler ekliyoruz (Widgets)
         widgets = {
@@ -80,9 +66,13 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
                 'placeholder': 'Yaşadığınız sorunu detaylıca açıklayınız...'
             }),
             'attachment': forms.FileInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Bir dosya veya görsel seçin...'
-        }),
+                'class': 'form-control',
+                'accept': '.png,.jpg,.jpeg,.pdf,.zip,.log',
+                'placeholder': 'Bir dosya veya görsel seçin...'
+            }),
+            'is_public': forms.CheckboxInput(attrs={
+                'class': 'form-check-input ms-0'
+            }),
         }
 
         #widgets: HTML input etiketlerinin (text, select, textarea vb.) görünümünü ve özelliklerini (class, placeholder vb.) tanımladığımız yerdir.
@@ -134,15 +124,16 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
                 del self.fields['is_internal']
 
 
+    def clean_attachment(self):
+        attachment = self.cleaned_data.get('attachment')
+        if attachment:
+            validate_file_security(attachment)
+        return attachment
+
     class Meta:
         model = TicketComment # Formun bağlanacağı veritabanı tablosunu seçer.
         fields = ['content','is_internal','attachment'] # Formda gösterilecek alanlar.
 
-        #model = TicketComment: Formun veritabanındaki TicketComment tablosuyla eşleşeceğini belirtir.
-
-        #fields = ['content']: Formda yalnızca yorum içeriği alanının yer alacağını tanımlar. ticket, author ve created_at alanları hariç tutulur; bu bilgileri views.py içinde arka planda biz bağlayacağız.
-
-        
         widgets = {
             'content': forms.Textarea(attrs={
                 'class': 'form-control',
@@ -154,6 +145,7 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
             }),
             'attachment': forms.FileInput(attrs={
                 'class': 'form-control',
+                'accept': '.png,.jpg,.jpeg,.pdf,.zip,.log',
             }),
         }
         

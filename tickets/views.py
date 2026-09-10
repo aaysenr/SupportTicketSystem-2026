@@ -1,18 +1,16 @@
 from django.shortcuts import render, get_object_or_404, redirect
+from django.http import JsonResponse
 from .models import Ticket
 from .forms import TicketForm,CommentForm, UserRegisterForm # CommentForm sınıfını detay görünümünde kullanabilmek için içeri aktarır.
 from django.contrib.auth.models import User
-from django.db.models import Q  # Karmaşık arama sorguları (OR işlemleri) için Q nesnesini içeri aktarıyoruz
-#Q Nesnesi: Normalde Django ORM'de .filter(title=..., description=...) yazıldığında araya AND (VE) koyar. SQL'deki OR (VEYA) mantığını kurabilmek için Q nesnesini içeri aktarırız.
+from django.db.models import Q, Count, Avg  # Karmaşık arama sorguları, sayım ve ortalama için nesneleri içeri aktarıyoruz
+from django.core.paginator import Paginator  # Sayfalama (Pagination) için Paginator sınıfı
 from django.core.mail import send_mail
 from .models import EmailVerification
 from django.contrib.auth import login, logout, authenticate, update_session_auth_hash 
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, PasswordChangeForm #
 from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm 
-from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog
-from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog, Notification
-from django.http import JsonResponse
-from .models import ChatGroup, ChatMessage
+from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog, Notification, ChatGroup, ChatMessage, UserProfile, KnowledgeBaseArticle, TicketRating
 
 # render: Django'nun HTML şablonlarını (template) verilerle birleştirip kullanıcıya sunmasını sağlayan pratik bir yardımcı fonksiyondur.
 # from .models import Ticket: Bulunduğumuz uygulama klasöründeki (.) models.py dosyasından veritabanı tablomuzu temsil eden Ticket modelini projeye dahil eder.
@@ -62,30 +60,59 @@ def admin_dashboard_view(request):
         messages.error(request, "Bu sayfayı görüntüleme yetkiniz yok!")
         return redirect('ticket_list')
 
-    # 1. Temel Metrikler
-    total_tickets = Ticket.objects.count()
-    open_tickets = Ticket.objects.filter(status='open').count()
-    in_progress_tickets = Ticket.objects.filter(status='in_progress').count()
-    resolved_tickets = Ticket.objects.filter(status='resolved').count()
-    urgent_tickets = Ticket.objects.filter(priority='urgent').count()
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
 
-    # 2. Bu Ay Açılan ve Bu Ay Çözülen Talepler
+    # RBAC Kapsam Belirleme: Süper yönetici tüm talepleri, personel sadece kendi birimini görür
+    if is_superadmin:
+        base_qs = Ticket.objects.all()
+        categories = Category.objects.annotate(ticket_count=Count('tickets'))
+    elif profile and profile.assigned_categories.exists():
+        allowed_cats = profile.assigned_categories.all()
+        base_qs = Ticket.objects.filter(
+            Q(category__in=allowed_cats) | Q(assigned_to=request.user)
+        ).distinct()
+        categories = allowed_cats.annotate(ticket_count=Count('tickets'))
+    else:
+        base_qs = Ticket.objects.all()
+        categories = Category.objects.annotate(ticket_count=Count('tickets'))
+
+    # 1. Temel Metrikler (Yetkili Kapsama Göre)
+    total_tickets = base_qs.count()
+    open_tickets = base_qs.filter(status='open').count()
+    in_progress_tickets = base_qs.filter(status='in_progress').count()
+    resolved_tickets = base_qs.filter(status='resolved').count()
+    urgent_tickets = base_qs.filter(priority='urgent').count()
+
+    # 2. SLA Yanıt Süresi Analizi (Geciken / Kritik Talepler)
+    all_tickets_list = list(base_qs.select_related('created_by', 'category'))
+    sla_breached_tickets = [t for t in all_tickets_list if t.is_sla_breached]
+    sla_breached_count = len(sla_breached_tickets)
+
+    # 3. Müşteri Memnuniyet (CSAT) Metrikleri
+    csat_qs = TicketRating.objects.filter(ticket__in=base_qs)
+    csat_count = csat_qs.count()
+    csat_avg_raw = csat_qs.aggregate(Avg('score'))['score__avg']
+    csat_avg = round(csat_avg_raw, 1) if csat_avg_raw else 0.0
+    satisfied_count = csat_qs.filter(score__gte=4).count()
+    satisfaction_rate = round((satisfied_count / csat_count) * 100, 1) if csat_count > 0 else 0
+
+    # 4. Bu Ay Açılan ve Bu Ay Çözülen Talepler
     now = timezone.now()
     first_day_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    resolved_this_month = Ticket.objects.filter(status='resolved', updated_at__gte=first_day_of_month).count()
-    created_this_month = Ticket.objects.filter(created_at__gte=first_day_of_month).count()
+    resolved_this_month = base_qs.filter(status='resolved', updated_at__gte=first_day_of_month).count()
+    created_this_month = base_qs.filter(created_at__gte=first_day_of_month).count()
 
-    # 3. Kategori Dağılımı Verileri (Chart.js İçin)
-    categories = Category.objects.annotate(ticket_count=Count('tickets'))
+    # 5. Kategori Dağılımı Verileri (Chart.js İçin)
     category_labels = [cat.name for cat in categories]
     category_counts = [cat.ticket_count for cat in categories]
 
-    # 4. Öncelik Dağılımı Verileri
+    # 6. Öncelik Dağılımı Verileri
     priority_data = {
-        'Düşük': Ticket.objects.filter(priority='low').count(),
-        'Orta': Ticket.objects.filter(priority='medium').count(),
-        'Yüksek': Ticket.objects.filter(priority='high').count(),
-        'Acil': Ticket.objects.filter(priority='urgent').count(),
+        'Düşük': base_qs.filter(priority='low').count(),
+        'Orta': base_qs.filter(priority='medium').count(),
+        'Yüksek': base_qs.filter(priority='high').count(),
+        'Acil': base_qs.filter(priority='urgent').count(),
     }
 
     context = {
@@ -96,6 +123,15 @@ def admin_dashboard_view(request):
         'urgent_tickets': urgent_tickets,
         'resolved_this_month': resolved_this_month,
         'created_this_month': created_this_month,
+        'user_profile': profile,
+        'is_superadmin': is_superadmin,
+        
+        # SLA & CSAT Metrikleri
+        'sla_breached_count': sla_breached_count,
+        'sla_breached_tickets': sla_breached_tickets[:5],
+        'csat_count': csat_count,
+        'csat_avg': csat_avg,
+        'satisfaction_rate': satisfaction_rate,
         
         # Chart.js'in JSON formatında okuyabilmesi için:
         'category_labels_json': json.dumps(category_labels),
@@ -290,11 +326,22 @@ def ticket_list(request):
 
 
     filter_mine = request.GET.get('mine') == '1' or request.GET.get('filter') == 'mine'
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
 
-       # 1. Kullanıcının rolüne ve seçili filtreye göre temel talep kümesini belirliyoruz
-    if request.user.is_staff:
+    # 1. Kullanıcının rolüne ve seçili filtreye göre temel talep kümesini belirliyoruz (RBAC)
+    if request.user.is_staff or is_superadmin:
         if filter_mine:
             base_tickets = Ticket.objects.filter(created_by=request.user).select_related('created_by', 'category', 'assigned_to')
+        elif is_superadmin:
+            # Süper Yönetici: Sistemdeki tüm talepleri eksiksiz görür
+            base_tickets = Ticket.objects.all().select_related('created_by', 'category', 'assigned_to')
+        elif profile and profile.assigned_categories.exists():
+            # Teknik Destek / Finans Yetkilisi: Sorumlu olduğu kategoriler + kendisine atananlar + kendi açtığı talepler
+            allowed_cats = profile.assigned_categories.all()
+            base_tickets = Ticket.objects.filter(
+                Q(category__in=allowed_cats) | Q(assigned_to=request.user) | Q(created_by=request.user)
+            ).distinct().select_related('created_by', 'category', 'assigned_to')
         else:
             base_tickets = Ticket.objects.all().select_related('created_by', 'category', 'assigned_to')
     else:
@@ -326,92 +373,70 @@ def ticket_list(request):
     urgent_count = base_tickets.filter(priority='urgent').count()
     
 
-    #total_count = base_tickets.count(): Kullanıcının yetkisi dahilindeki toplam talep adedi.
-
-    #.filter(status='open').count(): Sadece durumu open (Açık) olanları sayar.
-
-    #.filter(status='in_progress').count(): Sadece durumu in_progress (Devam Ediyor) olanları sayar.
-
-    #.filter(status='resolved').count(): Sadece durumu resolved (Çözüldü) olanları sayar.
-
-    #.filter(priority='urgent').count(): Kritik ve anında müdahale gerektiren urgent (Acil) öncelikli talepleri sayar.
-    
-
-
     # 3. URL Arama ve Filtreleme İşlemleri
-    tickets = base_tickets
-    #Bağımsız Filtreleme: Arama ve dropdown filtreleri tickets değişkeni üzerinden yürütülür, base_tickets sayaçları etkilenmez.
+    tickets = base_tickets.annotate(comment_count=Count('comments'))
     
-    # URL'den gelen GET parametrelerini yakalıyoruz (Örn: /?q=yazici&status=open&priority=urgent)
-    search_query = request.GET.get('q', '')
-    selected_status = request.GET.get('status', '')
-    selected_priority = request.GET.get('priority', '')
+    # URL'den gelen GET parametrelerini yakalıyoruz
+    search_query = request.GET.get('q', '').strip()
+    selected_status = request.GET.get('status', '').strip()
+    selected_priority = request.GET.get('priority', '').strip()
+    selected_sort = request.GET.get('sort', 'newest').strip()
+    selected_solution = request.GET.get('solution', 'all').strip()
 
-
-    #request.GET.get('anahtar', ''): Tarayıcı adres çubuğundaki parametreleri okur (Örn: /?q=yazici&status=open).
-    #Eğer parametre URL'de yoksa varsayılan olarak boş metin ('') döner, hata fırlatmaz.
-
-
-    # Kelime Arama Filtresi (Başlıkta VEYA Açıklamada arar - icontains: büyük/küçük harf duyarsız arama)
+    # Kelime Arama Filtresi (Başlıkta VEYA Açıklamada arar)
     if search_query:
         tickets = tickets.filter(
             Q(title__icontains=search_query) | Q(description__icontains=search_query)
         )
 
-    #Q(title__icontains=search_query) | Q(description__icontains=search_query): Django ORM'e "ya başlıkta (title) aradığımız kelimeyi içeriyorsa VEYA açıklama (description) kısmında içeriyorsa getir" deriz.
-    #icontains:insensitive contain (küçük/büyük harf duyarsız içerir). SQL'deki ILIKE operatörünün Django karşılığıdır. Yani 'Yazıcı' ve 'yazıcı' aramalarını aynı sonucu verir.
-    # | : Python'daki VEYA operatörüdür. Django ORM, Q nesneleri ile kullanıldığında bunu SQL'deki OR operatörüne çevirir.
-    # tickets.filter(...): Mevcut ticket listesini (ki başlangıçta tüm liste idi) bu yeni kritere göre daraltır/filtrelersin.
-
-    # | Operatörü: Q(...) | Q(...) ifadesi SQL'deki OR bağlacıdır.
-    # __icontains: "Case-insensitive contains" anlamına gelir. Metnin büyük/küçük harf duyarsız olarak aranan kelimeyi içerip içermediğini denetler.
-    # Oluşan SQL: WHERE (title LIKE '%yazici%' OR description LIKE '%yazici%')
-
-
-
     # Durum Filtresi
     if selected_status:
         tickets = tickets.filter(status=selected_status)
-    
-    # selected_status: Eğer kullanıcı dropdown menülerden bir durum veya öncelik seçtiyse sorguya AND status = 'open' şeklinde ek filtre ekler.
-    # tickets.filter(status=selected_status): Mevcut ticket listesini, sadece durumu seçilen durumla eşleşen kayıtlar kalacak şekilde günceller.
-    # Eğer durum seçilmemişse bu satır atlanır ve filtreleme yapılmaz.
-    #Örn: status=open ise -> WHERE status='open' sorgusu eklenir.
-
 
     # Öncelik Filtresi
     if selected_priority:
         tickets = tickets.filter(priority=selected_priority)
 
-    # selected_priority: Eğer kullanıcı dropdown menülerden bir durum veya öncelik seçtiyse sorguya AND status = 'open' şeklinde ek filtre ekler.
-    # tickets.filter(priority=selected_priority): Mevcut ticket listesini, sadece önceliği seçilen öncelikle eşleşen kayıtlar kalacak şekilde günceller.
-    # Eğer öncelik seçilmemişse bu satır atlanır ve filtreleme yapılmaz.
-    # Örn: priority=urgent ise -> WHERE priority='urgent' sorgusu eklenir.
-    
-    
-    
-    
-    # 4. Şablona hem talepleri hem de istatistik sayılarını gönderiyoruz
-    # HTML şablonuna hem filtrelenmiş verileri hem de seçili filtre durumlarını gönderiyoruz
-    
-    # HTML şablonuna göndereceğimiz verileri bir dictionary (sözlük) haline getiriyoruz
+    # Çözüm Durumu Filtresi
+    if selected_solution == 'solved':
+        tickets = tickets.filter(Q(status='resolved') | Q(comments__is_solution=True)).distinct()
+    elif selected_solution == 'unsolved':
+        tickets = tickets.exclude(status='resolved').exclude(comments__is_solution=True).distinct()
+
+    # Sıralama (Sort)
+    if selected_sort == 'oldest':
+        tickets = tickets.order_by('created_at')
+    elif selected_sort == 'most_commented':
+        tickets = tickets.order_by('-comment_count', '-created_at')
+    else:  # newest
+        tickets = tickets.order_by('-created_at')
+
+    # Sayfalama (Pagination - Sayfa başına 10 talep)
+    paginator = Paginator(tickets, 10)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
+    # 4. Şablona verileri gönderiyoruz
     context = {
-        'tickets': tickets,
+        'tickets': page_obj,
+        'page_obj': page_obj,
         'search_query': search_query,
         'selected_status': selected_status,
         'selected_priority': selected_priority,
+        'selected_sort': selected_sort,
+        'selected_solution': selected_solution,
         'filter_mine': filter_mine,
         'status_choices': Ticket.STATUS_CHOICES,
         'priority_choices': Ticket.PRIORITY_CHOICES,
 
         # İstatistik Değişkenleri
-        #Hesaplanan 5 ayrı sayaç context sözlüğüne eklenerek HTML şablonuna gönderilir.
         'total_count': total_count,
         'open_count': open_count,
         'in_progress_count': in_progress_count,
         'resolved_count': resolved_count,
         'urgent_count': urgent_count,
-
+        'user_profile': profile,
+        'is_superadmin': is_superadmin,
     }
     # Veritabanından çekilen veriyi HTML şablonuna aktarabilmek için bir Python dictionary (sözlük) yapısı oluşturulur.
     # Sözlükteki 'tickets' anahtarı, HTML tarafında bu verilere erişmek için kullanacağımız değişken adı olacaktır.
@@ -471,10 +496,18 @@ def ticket_detail(request, pk):
     """
 
 
-    # GİZLİLİK KONTROLÜ: Özel talepleri sadece yetkili yöneticiler veya talebi açan kullanıcı görebilir!
-    if not ticket.is_public and not request.user.is_staff and ticket.created_by != request.user:
-        messages.error(request, "Bu özel destek talebini görüntüleme yetkiniz yok!")
-        return redirect('ticket_list')
+    # GİZLİLİK VE RBAC KONTROLÜ:
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
+
+    if not ticket.is_public and ticket.created_by != request.user and ticket.assigned_to != request.user and not is_superadmin:
+        if not request.user.is_staff:
+            messages.error(request, "Bu özel destek talebini görüntüleme yetkiniz yok!")
+            return redirect('ticket_list')
+        elif profile and profile.assigned_categories.exists() and ticket.category:
+            if not profile.assigned_categories.filter(id=ticket.category.id).exists():
+                messages.error(request, "Bu departman/kategoriye ait talepleri görüntüleme yetkiniz bulunmamaktadır!")
+                return redirect('ticket_list')
 
 
     # Sistem log metinlerini yorumlar akışından süzüp sadece gerçek kullanıcı yorumlarını çekiyoruz
@@ -535,6 +568,13 @@ def ticket_detail(request, pk):
             comment.author = request.user
             comment.save()
 
+            # SLA Takibi: Destek yetkilisi yanıt verdiğinde ilk yanıt tarihini kaydet
+            author_profile = getattr(comment.author, 'profile', None)
+            is_staff_commenter = comment.author.is_staff or (author_profile and author_profile.is_staff_agent)
+            if is_staff_commenter and not ticket.first_response_at:
+                ticket.first_response_at = timezone.now()
+                ticket.save(update_fields=['first_response_at'])
+
 
             
             # CANLI BİLDİRİM: Yorumu yazan kişi talep sahibi değilse bildirim oluştur
@@ -594,6 +634,7 @@ def ticket_detail(request, pk):
         'comments': comments,
         'comment_form': comment_form,
         'activity_logs': ticket.activity_logs.all(),
+        'has_solution': comments.filter(is_solution=True).exists(),
     }
 
     """
@@ -717,11 +758,20 @@ def ticket_edit(request, pk):
     #Güvenli Nesne Çekme: Düzenlenmek istenen talep veritabanında mevcutsa ticket değişkenine atar; mevcut değilse sunucuyu çökertmeden 404 Not Found döner.
 
    
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
+
     # Güvenlik Kontrolü 1: Yetkisiz kullanıcı engeli
     if not request.user.is_staff and ticket.created_by != request.user:
         messages.error(request, "Bu destek talebini düzenleme yetkiniz yok!")
         return redirect('ticket_list')
 
+    # RBAC Kontrolü: Personel başka birimin/kategorinin talebini düzenleyemez
+    if request.user.is_staff and not is_superadmin and ticket.assigned_to != request.user and ticket.created_by != request.user:
+        if profile and profile.assigned_categories.exists() and ticket.category:
+            if not profile.assigned_categories.filter(id=ticket.category.id).exists():
+                messages.error(request, "Bu departman/kategoriye ait talepleri düzenleme yetkiniz bulunmamaktadır!")
+                return redirect('ticket_list')
 
     # Güvenlik Kontrolü 2: Normal kullanıcı çözülmüş/kapatılmış talebi düzenleyemesin
     if not request.user.is_staff and ticket.status in ['resolved', 'closed']:
@@ -917,12 +967,15 @@ def send_notification_email(subject, message, recipient_list):
         recipients = ", ".join([e for e in recipient_list if e])
         
         # Terminalde temiz ve tek bir Türkçe bildirim gösterelim:
-        print("\n" + "="*60)
-        print(f"📧 E-POSTA BİLDİRİMİ GÖNDERİLDİ")
-        print(f"📩 Alıcı : {recipients}")
-        print(f"📌 Konu  : {subject}")
-        print(f"📝 İçerik:\n{message}")
-        print("="*60 + "\n")
+        try:
+            print("\n" + "="*60)
+            print(f"[E-POSTA] E-POSTA BİLDİRİMİ GÖNDERİLDİ")
+            print(f"Alıcı : {recipients}")
+            print(f"Konu  : {subject}")
+            print(f"İçerik:\n{message}")
+            print("="*60 + "\n")
+        except Exception:
+            pass
         
         try:
             # Gerçek sunucuda (SMTP) mail gönderir, geliştirme modunda konsolda tekrar basmaması için:
@@ -977,7 +1030,7 @@ def team_chat_view(request, chat_type='group', chat_id=None):
     if request.user not in general_group.members.all():
         general_group.members.add(request.user)
 
-    # 2. Tüm Yöneticileri ve Üzerlerindeki Aktif Bilet Sayısını Çek
+    # 2. Tüm Yöneticileri ve Üzerlerindeki Aktif Talep Sayısını Çek
     managers = User.objects.filter(is_staff=True).annotate(
         active_tickets_count=Count(
             'assigned_tickets',
@@ -1123,3 +1176,265 @@ def get_chat_messages_api(request, chat_type, chat_id):
         })
 
     return JsonResponse({'messages': data})
+
+
+@login_required
+def toggle_comment_solution(request, comment_id):
+    """
+    Bir yorumu En İyi Yanıt / Çözüm olarak işaretler veya işaretini kaldırır.
+    İzin: Sadece talebi açan kullanıcı veya yöneticiler (is_staff) işlem yapabilir.
+    AJAX / Fetch API ile sayfa yenilenmeden çalışmayı destekler.
+    """
+    comment = get_object_or_404(TicketComment, id=comment_id)
+    ticket = comment.ticket
+    is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '') or request.GET.get('ajax') == '1'
+
+    # Yetki kontrolü: Yalnızca talebi açan veya yönetici işaretleyebilir
+    if request.user != ticket.created_by and not request.user.is_staff:
+        if is_ajax:
+            return JsonResponse({'status': 'error', 'message': 'Bu yorumu çözüm olarak işaretleme yetkiniz yok.'}, status=403)
+        messages.error(request, "Bu yorumu çözüm olarak işaretleme yetkiniz yok.")
+        return redirect('ticket_detail', pk=ticket.id)
+
+    if comment.is_solution:
+        comment.is_solution = False
+        comment.save()
+        msg = "Çözüm işareti kaldırıldı."
+        # Geri alma: Başka çözüm yoksa ve talep çözüldü durumundaysa devam ediyor durumuna geri çek
+        if ticket.status == 'resolved' and not ticket.comments.filter(is_solution=True).exists():
+            ticket.status = 'in_progress'
+            ticket.save(update_fields=['status', 'updated_at'])
+            TicketActivityLog.objects.create(
+                ticket=ticket,
+                actor=request.user,
+                action=f"Yorum (#{comment.id}) çözüm işareti geri alındı; talep 'Devam Ediyor' olarak güncellendi."
+            )
+        if not is_ajax:
+            messages.info(request, msg)
+    else:
+        # Talebe ait tüm yorumların çözüm durumunu sıfırla (Her talepte tek onaylı çözüm)
+        ticket.comments.update(is_solution=False)
+        comment.is_solution = True
+        comment.save()
+        # Talebi otomatik olarak 'Çözüldü' yap
+        if ticket.status != 'resolved':
+            ticket.status = 'resolved'
+            ticket.save(update_fields=['status', 'updated_at'])
+            TicketActivityLog.objects.create(
+                ticket=ticket,
+                actor=request.user,
+                action=f"Yorum (#{comment.id}) çözüm olarak onaylandı; talep 'Çözüldü' olarak işaretlendi."
+            )
+        msg = "Yorum 'En İyi Yanıt / Çözüm' olarak işaretlendi! ✅"
+        if not is_ajax:
+            messages.success(request, msg)
+
+    has_solution = ticket.comments.filter(is_solution=True).exists()
+
+    if is_ajax:
+        return JsonResponse({
+            'status': 'ok',
+            'is_solution': comment.is_solution,
+            'comment_id': comment.id,
+            'has_solution': has_solution,
+            'ticket_status': ticket.status,
+            'ticket_status_display': ticket.get_status_display(),
+            'message': msg
+        })
+
+    return redirect('ticket_detail', pk=ticket.id)
+
+
+@login_required
+def toggle_comment_like(request, comment_id):
+    """
+    Bir yorumu faydalı bulup beğenmeyi (upvote) veya beğeniyi kaldırmayı sağlar.
+    AJAX / Fetch API ile sayfa yenilenmeden çalışmayı destekler.
+    """
+    comment = get_object_or_404(TicketComment, id=comment_id)
+    ticket = comment.ticket
+    is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '') or request.GET.get('ajax') == '1'
+
+    if request.user in comment.likes.all():
+        comment.likes.remove(request.user)
+        liked = False
+        msg = "Yorum beğenisi kaldırıldı."
+        if not is_ajax:
+            messages.info(request, msg)
+    else:
+        comment.likes.add(request.user)
+        liked = True
+        msg = "Yorumu faydalı buldunuz! 👍"
+        if not is_ajax:
+            messages.success(request, msg)
+
+    if is_ajax:
+        return JsonResponse({
+            'status': 'ok',
+            'liked': liked,
+            'like_count': comment.like_count,
+            'comment_id': comment.id,
+            'message': msg
+        })
+
+    return redirect('ticket_detail', pk=ticket.id)
+
+
+# --- BİLGİ BANKASI (KNOWLEDGE BASE / FAQ) GÖRÜNÜMLERİ ---
+
+def knowledge_base_list_view(request):
+    """
+    Sıkça sorulan sorular (SSS) ve Bilgi Bankası makale listesi.
+    """
+    q = request.GET.get('q', '').strip()
+    selected_category = request.GET.get('category', '').strip()
+
+    articles = KnowledgeBaseArticle.objects.filter(is_published=True)
+
+    if q:
+        articles = articles.filter(
+            Q(title__icontains=q) | 
+            Q(content__icontains=q) | 
+            Q(keywords__icontains=q)
+        )
+
+    if selected_category:
+        articles = articles.filter(category=selected_category)
+
+    # Kategori istatistikleri
+    categories_stats = []
+    for cat_code, cat_name in KnowledgeBaseArticle.CATEGORY_CHOICES:
+        count = KnowledgeBaseArticle.objects.filter(is_published=True, category=cat_code).count()
+        categories_stats.append({
+            'code': cat_code,
+            'name': cat_name,
+            'count': count,
+        })
+
+    paginator = Paginator(articles, 8)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        'articles': page_obj,
+        'categories_stats': categories_stats,
+        'search_query': q,
+        'selected_category': selected_category,
+        'category_choices': KnowledgeBaseArticle.CATEGORY_CHOICES,
+    }
+    return render(request, 'tickets/knowledge_base.html', context)
+
+
+def knowledge_base_detail_view(request, pk):
+    """
+    Tek bir Bilgi Bankası makalesinin detay sayfası.
+    """
+    article = get_object_or_404(KnowledgeBaseArticle, pk=pk, is_published=True)
+    # Görüntülenme sayacını artır
+    KnowledgeBaseArticle.objects.filter(pk=pk).update(views_count=article.views_count + 1)
+    article.refresh_from_db(fields=['views_count'])
+
+    # Benzer / İlgili makaleler
+    related_articles = KnowledgeBaseArticle.objects.filter(
+        is_published=True, category=article.category
+    ).exclude(pk=article.pk)[:4]
+
+    context = {
+        'article': article,
+        'related_articles': related_articles,
+    }
+    return render(request, 'tickets/knowledge_base_detail.html', context)
+
+
+def kb_suggest_api(request):
+    """
+    Yeni talep formunda kullanıcının yazdığı başlığa göre canlı SSS ve benzer çözülmüş talep önerisi sunan AJAX API'si.
+    """
+    q = request.GET.get('q', '').strip()
+    if len(q) < 3:
+        return JsonResponse({'suggestions': []})
+
+    suggestions = []
+
+    # 1. Bilgi Bankası Makaleleri
+    kb_qs = KnowledgeBaseArticle.objects.filter(
+        is_published=True
+    ).filter(
+        Q(title__icontains=q) | Q(keywords__icontains=q) | Q(content__icontains=q)
+    )[:4]
+
+    for item in kb_qs:
+        suggestions.append({
+            'id': item.id,
+            'title': item.title,
+            'category': item.get_category_display(),
+            'snippet': (item.content[:120] + '...') if len(item.content) > 120 else item.content,
+            'url': f"/knowledge-base/{item.id}/",
+            'type': 'kb',
+            'type_display': '📚 Bilgi Bankası Makalesi'
+        })
+
+    # 2. Herkese Açık ve Çözülmüş Benzer Talepler
+    resolved_tickets = Ticket.objects.filter(
+        is_public=True,
+        status='resolved'
+    ).filter(
+        Q(title__icontains=q) | Q(description__icontains=q)
+    ).select_related('category')[:3]
+
+    for t in resolved_tickets:
+        suggestions.append({
+            'id': t.id,
+            'title': t.title,
+            'category': t.category.name if t.category else "Genel",
+            'snippet': (t.description[:120] + '...') if len(t.description) > 120 else t.description,
+            'url': f"/ticket/{t.id}/",
+            'type': 'ticket',
+            'type_display': '✅ Çözülmüş Topluluk Talebi'
+        })
+
+    return JsonResponse({'suggestions': suggestions})
+
+
+@login_required
+def submit_ticket_rating_api(request, ticket_id):
+    """
+    Çözülmüş bir destek talebi için müşteri memnuniyeti (CSAT) puanı ve görüşü kaydetme API'si.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Sadece POST isteği kabul edilir.'}, status=405)
+
+    ticket = get_object_or_404(Ticket, id=ticket_id)
+
+    # Sadece talep sahibi veya süper yönetici değerlendirebilir
+    if ticket.created_by != request.user and not request.user.is_superuser:
+        return JsonResponse({'status': 'error', 'message': 'Yalnızca talep sahibi değerlendirme yapabilir.'}, status=403)
+
+    if ticket.status != 'resolved':
+        return JsonResponse({'status': 'error', 'message': 'Sadece çözüldü durumundaki talepler değerlendirilebilir.'}, status=400)
+
+    try:
+        score = int(request.POST.get('score', 5))
+        if score < 1 or score > 5:
+            score = 5
+    except (ValueError, TypeError):
+        score = 5
+
+    feedback = request.POST.get('feedback', '').strip()
+
+    rating, created = TicketRating.objects.update_or_create(
+        ticket=ticket,
+        defaults={
+            'user': request.user,
+            'score': score,
+            'feedback': feedback,
+        }
+    )
+
+    return JsonResponse({
+        'status': 'ok',
+        'score': rating.score,
+        'feedback': rating.feedback,
+        'message': 'Geri bildiriminiz ve puanınız başarıyla kaydedildi. Teşekkür ederiz! ⭐'
+    })
+

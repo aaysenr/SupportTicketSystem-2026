@@ -6,7 +6,21 @@
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <h2 class="h3 fw-bold text-gray-800 mb-0">
         {% if user.is_staff %}
-            <i class="bi bi-speedometer2 me-2"></i>Yönetici Destek Paneli
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span><i class="bi bi-speedometer2 me-2"></i>Yönetici Destek Paneli</span>
+                {% if is_superadmin %}
+                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle fs-6 fw-normal">
+                        <i class="bi bi-shield-lock-fill me-1"></i>Süper Yönetici (Tüm Birimler)
+                    </span>
+                {% elif user_profile %}
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle fs-6 fw-normal">
+                        <i class="bi bi-person-badge-fill me-1"></i>{{ user_profile.get_role_display }}
+                        {% if user_profile.assigned_categories.all %}
+                            <span class="fw-semibold">({% for cat in user_profile.assigned_categories.all %}{{ cat.name }}{% if not forloop.last %}, {% endif %}{% endfor %})</span>
+                        {% endif %}
+                    </span>
+                {% endif %}
+            </div>
         {% else %}
             {% if filter_mine %}
                 <i class="bi bi-person-workspace me-2"></i>Destek Taleplerim
@@ -16,14 +30,6 @@
         {% endif %}
     </h2>
     <div class="d-flex align-items-center gap-2">
-        {% if user.is_staff %}
-        <a href="{% url 'team_chat' %}" class="btn btn-primary fw-semibold">
-            <i class="bi bi-chat-dots-fill me-1"></i> Ekip Sohbeti
-        </a>
-        <a href="{% url 'admin_dashboard' %}" class="btn btn-outline-primary fw-semibold">
-            <i class="bi bi-pie-chart-fill me-1"></i> İstatistikler
-        </a>
-        {% endif %}
         <a href="{% url 'ticket_create' %}" class="btn btn-success fw-semibold">
             <i class="bi bi-plus-circle me-1"></i> Yeni Talep Oluştur
         </a>
@@ -112,8 +118,13 @@
 <div class="card shadow-sm mb-4">
     <div class="card-body bg-light">
         <form method="GET" class="row g-3">
+            <!-- Taleplerim veya Genel Filtresi Saklama -->
+            {% if filter_mine %}
+            <input type="hidden" name="mine" value="1">
+            {% endif %}
+
             <!-- Metin Arama Kutusu -->
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label for="q" class="form-label fw-bold small text-muted">Kelime ile Ara</label>
                 <div class="input-group">
                     <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
@@ -122,7 +133,7 @@
                 </div>
             </div>
             <!-- Durum Filtresi -->
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label for="status" class="form-label fw-bold small text-muted">Durum</label>
                 <select name="status" id="status" class="form-select">
                     <option value="">Tüm Durumlar</option>
@@ -136,7 +147,7 @@
                 </select>
             </div>
             <!-- Öncelik Filtresi -->
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label for="priority" class="form-label fw-bold small text-muted">Öncelik</label>
                 <select name="priority" id="priority" class="form-select">
                     <option value="">Tüm Öncelikler</option>
@@ -149,14 +160,32 @@
                     {% endfor %}
                 </select>
             </div>
+            <!-- Sıralama -->
+            <div class="col-md-2">
+                <label for="sort" class="form-label fw-bold small text-muted">Sıralama</label>
+                <select name="sort" id="sort" class="form-select">
+                    <option value="newest" {% if selected_sort == 'newest' %}selected{% endif %}>En Yeni</option>
+                    <option value="oldest" {% if selected_sort == 'oldest' %}selected{% endif %}>En Eski</option>
+                    <option value="most_commented" {% if selected_sort == 'most_commented' %}selected{% endif %}>En Çok Yorum Alanlar</option>
+                </select>
+            </div>
+            <!-- Çözüm Durumu -->
+            <div class="col-md-2">
+                <label for="solution" class="form-label fw-bold small text-muted">Çözüm</label>
+                <select name="solution" id="solution" class="form-select">
+                    <option value="all" {% if selected_solution == 'all' %}selected{% endif %}>Tümü</option>
+                    <option value="solved" {% if selected_solution == 'solved' %}selected{% endif %}>✓ Çözülenler</option>
+                    <option value="unsolved" {% if selected_solution == 'unsolved' %}selected{% endif %}>&#x231B;&#xFE0E; Çözülmeyenler</option>
+                </select>
+            </div>
 
             <!-- Butonlar -->
-            <div class="col-md-2 d-flex align-items-end gap-2">
-                <button type="submit" class="btn btn-primary w-100">
-                    <i class="bi bi-funnel me-1"></i> Filtrele
+            <div class="col-md-1 d-flex align-items-end gap-1">
+                <button type="submit" class="btn btn-primary w-100" title="Filtrele">
+                    <i class="bi bi-funnel"></i>
                 </button>
-                {% if search_query or selected_status or selected_priority %}
-                <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary" title="Filtreleri Sıfırla">
+                {% if search_query or selected_status or selected_priority or selected_sort != 'newest' or selected_solution != 'all' %}
+                <a href="{% url 'ticket_list' %}{% if filter_mine %}?mine=1{% endif %}" class="btn btn-outline-secondary" title="Sıfırla">
                     <i class="bi bi-x-lg"></i>
                 </a>
                 {% endif %}
@@ -177,7 +206,7 @@
                         <th>Kategori</th>
                         <th>Öncelik</th>
                         <th>Durum</th>
-                        <th>Atanan</th> <!-- EKLENDİ -->
+                        <th>Atanan</th>
                         <th>Oluşturan</th>
                         <th>Tarih</th>
                     </tr>
@@ -195,6 +224,18 @@
                             <span class="badge bg-info text-dark rounded-pill" style="font-size: 0.75rem;" title="Herkese Açık Topluluk Talebi"><i class="bi bi-globe me-1"></i>Genel</span>
                             {% else %}
                             <span class="badge bg-light text-muted border rounded-pill" style="font-size: 0.75rem;" title="Özel Gizli Talep"><i class="bi bi-lock-fill me-1"></i>Özel</span>
+                            {% endif %}
+                            {% if ticket.comment_count > 0 %}
+                            <span class="badge bg-secondary rounded-pill ms-1" title="Yorum Sayısı"><i class="bi bi-chat-text me-1"></i>{{ ticket.comment_count }}</span>
+                            {% endif %}
+                            {% if ticket.is_sla_breached %}
+                            <span class="badge bg-danger text-white rounded-pill ms-1 shadow-xs" title="SLA süresi aşıldı! ({{ ticket.sla_remaining_text }})">
+                                <i class="bi bi-alarm-fill me-1"></i>SLA Aşıldı
+                            </span>
+                            {% elif ticket.status in 'open in_progress' and ticket.priority == 'urgent' and not ticket.first_response_at %}
+                            <span class="badge bg-warning-subtle text-danger border border-warning rounded-pill ms-1" title="Acil SLA Kalan: {{ ticket.sla_remaining_text }}">
+                                <i class="bi bi-hourglass-split me-1"></i>{{ ticket.sla_remaining_text }}
+                            </span>
                             {% endif %}
                         </td>
                         <td>
@@ -238,7 +279,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="7" class="text-center py-4 text-muted">
+                        <td colspan="8" class="text-center py-4 text-muted">
                             <i class="bi bi-inbox display-6 d-block mb-2"></i>
                             Aranan kriterlere uygun destek talebi bulunamadı.
                         </td>
@@ -249,4 +290,47 @@
         </div>
     </div>
 </div>
+
+<!-- BOOTSTRAP 5 SAYFALAMA (PAGINATION) -->
+{% if page_obj.has_other_pages %}
+<nav aria-label="Talep Sayfalaması" class="mt-4 d-flex justify-content-center">
+    <ul class="pagination shadow-sm">
+        {% if page_obj.has_previous %}
+        <li class="page-item">
+            <a class="page-item page-link" href="?page={{ page_obj.previous_page_number }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if filter_mine %}&mine=1{% endif %}">
+                <i class="bi bi-chevron-left me-1"></i>Önceki
+            </a>
+        </li>
+        {% else %}
+        <li class="page-item disabled">
+            <span class="page-link"><i class="bi bi-chevron-left me-1"></i>Önceki</span>
+        </li>
+        {% endif %}
+
+        {% for num in page_obj.paginator.page_range %}
+            {% if page_obj.number == num %}
+            <li class="page-item active" aria-current="page">
+                <span class="page-link">{{ num }}</span>
+            </li>
+            {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ num }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if filter_mine %}&mine=1{% endif %}">{{ num }}</a>
+            </li>
+            {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if filter_mine %}&mine=1{% endif %}">
+                Sonraki<i class="bi bi-chevron-right ms-1"></i>
+            </a>
+        </li>
+        {% else %}
+        <li class="page-item disabled">
+            <span class="page-link">Sonraki<i class="bi bi-chevron-right ms-1"></i></span>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
 {% endblock %}

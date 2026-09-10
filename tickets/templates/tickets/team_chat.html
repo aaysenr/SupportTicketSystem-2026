@@ -76,8 +76,8 @@
                         </div>
                     </div>
                     <div class="text-end">
-                        <span class="badge {% if mgr.active_tickets_count > 0 %}bg-warning text-dark{% else %}bg-light text-muted{% endif %} rounded-pill small" title="Aktif Bilet Sayısı">
-                            {{ mgr.active_tickets_count }} Bilet
+                        <span class="badge {% if mgr.active_tickets_count > 0 %}bg-warning text-dark{% else %}bg-light text-muted{% endif %} rounded-pill small" title="{{ mgr.get_full_name|default:mgr.username }} kullanıcısına atanmış aktif destek talep sayısı">
+                            {{ mgr.active_tickets_count }} Talep
                         </span>
                     </div>
                 </a>
