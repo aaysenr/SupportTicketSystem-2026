@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.exceptions import ValidationError
 from django.urls import reverse
-from tickets.models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating
+from tickets.models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, Notification
 from tickets.validators import validate_file_security
 from django.utils import timezone
 from datetime import timedelta
@@ -177,8 +177,12 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertEqual(urgent_ticket.sla_target_hours, 2)
         self.assertIsNotNone(urgent_ticket.sla_deadline)
 
-        # Yanıt verilmemiş ve zaman geçmişse SLA aşılmış olmalı
-        urgent_ticket.created_at = timezone.now() - timedelta(hours=3)
+        # Mesai saatleri duyarlı SLA testi:
+        # Hafta içi mesai saatinde açılmış geçmiş bir talep
+        test_created = timezone.now().replace(hour=10, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        while test_created.weekday() in (5, 6):
+            test_created -= timedelta(days=1)
+        urgent_ticket.created_at = test_created
         urgent_ticket.save()
         self.assertTrue(urgent_ticket.is_sla_breached)
 
@@ -250,3 +254,154 @@ class SecurityAndRBACWorkflowTests(TestCase):
         rating = TicketRating.objects.get(ticket=self.ticket_tech)
         self.assertEqual(rating.score, 5)
         self.assertEqual(rating.user, self.normal_user)
+
+    # 8. GELİŞMİŞ GÜVENLİK & YETKİLENDİRME (SECTION A) TESTLERİ
+    def test_ticket_delete_rbac_permission_restrictions(self):
+        """Silme yetkisinin yalnızca yetkili veya sorumlu departman personeliyle sınırlandığını test et."""
+        delete_url = reverse('ticket_delete', kwargs={'pk': self.ticket_tech.pk})
+
+        # 1. Normal kullanıcı silemez (302 redirect ve hata mesajı)
+        self.client.login(username='john_doe', password='UserPass123!')
+        res_user = self.client.post(delete_url)
+        self.assertEqual(res_user.status_code, 302)
+        self.assertTrue(Ticket.objects.filter(pk=self.ticket_tech.pk).exists())
+
+        # 2. Finans yetkilisi, Teknik Destek talebini silemez (RBAC İzolasyonu)
+        self.client.login(username='fin_agent', password='FinPass123!')
+        res_fin = self.client.post(delete_url)
+        self.assertEqual(res_fin.status_code, 302)
+        self.assertTrue(Ticket.objects.filter(pk=self.ticket_tech.pk).exists())
+
+        # 3. Teknik destek yetkilisi kendi biriminin talebini silebilir
+        self.client.login(username='tech_agent', password='TechPass123!')
+        res_tech = self.client.post(delete_url)
+        self.assertEqual(res_tech.status_code, 302)
+        self.assertFalse(Ticket.objects.filter(pk=self.ticket_tech.pk).exists())
+
+    def test_secure_ticket_attachment_download_permissions(self):
+        """Özel taleplerin ek dosyalarına yetkisiz erişimin engellendiğini test et."""
+        # Ek dosya ekle
+        sample_file = SimpleUploadedFile("secret.pdf", b"%PDF-secret data", content_type="application/pdf")
+        self.ticket_fin.attachment = sample_file
+        self.ticket_fin.save()
+
+        download_url = reverse('ticket_attachment_download', kwargs={'pk': self.ticket_fin.pk})
+
+        # 1. Giriş yapmamış kullanıcı giriş sayfasına yönlendirilir (302)
+        res_anon = self.client.get(download_url)
+        self.assertEqual(res_anon.status_code, 302)
+
+        # 2. Yetkisiz personel (Teknik personeli, Finans talebini indiremez -> 403 Forbidden)
+        self.client.login(username='tech_agent', password='TechPass123!')
+        res_unauth = self.client.get(download_url)
+        self.assertEqual(res_unauth.status_code, 403)
+
+        # 3. Talebi açan kullanıcı (veya finans personeli) indirebilir -> 200 OK
+        self.client.login(username='john_doe', password='UserPass123!')
+        res_owner = self.client.get(download_url)
+        self.assertEqual(res_owner.status_code, 200)
+
+    # 9. FONKSİYONEL & OPERASYONEL (SECTION B) TESTLERİ
+    def test_mark_all_notifications_read(self):
+        """Kullanıcının tüm okunmamış bildirimlerini tek tıkla okundu olarak işaretleyebildiğini test et."""
+        # Normal kullanıcı için 2 bildirim oluştur
+        notif1 = Notification.objects.create(recipient=self.normal_user, ticket=self.ticket_tech, message="Bildirim 1")
+        notif2 = Notification.objects.create(recipient=self.normal_user, ticket=self.ticket_tech, message="Bildirim 2")
+        # Finans kullanıcısı için 1 bildirim oluştur
+        notif_fin = Notification.objects.create(recipient=self.fin_user, ticket=self.ticket_fin, message="Finans Bildirimi")
+
+        self.assertEqual(Notification.objects.filter(recipient=self.normal_user, is_read=False).count(), 2)
+
+        # Giriş yapıp 'tümünü okundu yap' çağır
+        self.client.login(username='john_doe', password='UserPass123!')
+        url = reverse('mark_all_notifications_read')
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+
+        # Normal kullanıcının tüm bildirimleri okunmuş olmalı
+        self.assertEqual(Notification.objects.filter(recipient=self.normal_user, is_read=False).count(), 0)
+        # Başka kullanıcının bildirimi okunmamış kalmalı (İzolasyon)
+        notif_fin.refresh_from_db()
+        self.assertFalse(notif_fin.is_read)
+
+    def test_export_tickets_csv_permissions_and_format(self):
+        """Excel/CSV dışa aktarımının sadece yetkililere açık olduğunu ve formatını test et."""
+        export_url = reverse('export_tickets_csv')
+
+        # 1. Normal kullanıcı dışa aktaramaz (302 redirect ve yetki mesajı)
+        self.client.login(username='john_doe', password='UserPass123!')
+        res_user = self.client.get(export_url)
+        self.assertEqual(res_user.status_code, 302)
+
+        # 2. Yetkili kullanıcı dışa aktarabilir
+        self.client.login(username='tech_agent', password='TechPass123!')
+        res_staff = self.client.get(export_url)
+        self.assertEqual(res_staff.status_code, 200)
+        self.assertEqual(res_staff['Content-Type'], 'text/csv; charset=utf-8-sig')
+        self.assertIn('attachment; filename="destek_talepleri_raporu_', res_staff['Content-Disposition'])
+        
+        # İçerik kontrolü
+        content = res_staff.content.decode('utf-8-sig')
+        self.assertIn('Talep No;Başlık;Kategori', content)
+        self.assertIn('Yazıcı Arızası', content)
+
+    def test_bulk_ticket_actions(self):
+        """Toplu işlem (bulk action) ile durum, atanan ve kategori güncellemesini test et."""
+        bulk_url = reverse('bulk_ticket_action')
+
+        # 1. Normal kullanıcı toplu işlem yapamaz
+        self.client.login(username='john_doe', password='UserPass123!')
+        res_user = self.client.post(bulk_url, {
+            'bulk_action': 'status',
+            'bulk_target_value': 'closed',
+            'selected_tickets': [self.ticket_tech.id]
+        })
+        self.assertEqual(res_user.status_code, 302)
+        self.ticket_tech.refresh_from_db()
+        self.assertNotEqual(self.ticket_tech.status, 'closed')
+
+        # 2. Departman yetkilisi sadece kendi kategorisindeki talepleri toplu güncelleyebilir (RBAC İzolasyonu)
+        self.client.login(username='tech_agent', password='TechPass123!')
+        res_bulk_status = self.client.post(bulk_url, {
+            'bulk_action': 'status',
+            'bulk_target_value': 'closed',
+            'selected_tickets': [self.ticket_tech.id, self.ticket_fin.id]
+        })
+        self.assertEqual(res_bulk_status.status_code, 302)
+        self.ticket_tech.refresh_from_db()
+        self.ticket_fin.refresh_from_db()
+        self.assertEqual(self.ticket_tech.status, 'closed')
+        # Finans talebine teknik personeli dokunamaz
+        self.assertEqual(self.ticket_fin.status, 'open')
+
+        # 3. Süper yönetici tüm talepleri toplu güncelleyebilir
+        self.client.login(username='superadmin', password='AdminPass123!')
+        res_super_status = self.client.post(bulk_url, {
+            'bulk_action': 'status',
+            'bulk_target_value': 'closed',
+            'selected_tickets': [self.ticket_fin.id]
+        })
+        self.assertEqual(res_super_status.status_code, 302)
+        self.ticket_fin.refresh_from_db()
+        self.assertEqual(self.ticket_fin.status, 'closed')
+
+        # 4. Toplu atama (assign) testi
+        res_bulk_assign = self.client.post(bulk_url, {
+            'bulk_action': 'assign',
+            'bulk_target_value': str(self.tech_user.id),
+            'selected_tickets': [self.ticket_tech.id]
+        })
+        self.assertEqual(res_bulk_assign.status_code, 302)
+        self.ticket_tech.refresh_from_db()
+        self.assertEqual(self.ticket_tech.assigned_to, self.tech_user)
+
+        # 5. Toplu kategori değiştirme testi
+        res_bulk_cat = self.client.post(bulk_url, {
+            'bulk_action': 'category',
+            'bulk_target_value': str(self.cat_fin.id),
+            'selected_tickets': [self.ticket_tech.id]
+        })
+        self.assertEqual(res_bulk_cat.status_code, 302)
+        self.ticket_tech.refresh_from_db()
+        self.assertEqual(self.ticket_tech.category, self.cat_fin)
+

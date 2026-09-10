@@ -63,6 +63,19 @@ urlpatterns = [
 
     # Müşteri Memnuniyet Anketi (CSAT) Değerlendirme API'si
     path('ticket/<int:ticket_id>/rate/', views.submit_ticket_rating_api, name='ticket_rate_api'),
+
+    # Güvenli Dosya İndirme ve Önizleme Rotaları (Yetki Kontrollü)
+    path('ticket/<int:pk>/attachment/', views.download_ticket_attachment, name='ticket_attachment_download'),
+    path('comment/<int:comment_id>/attachment/', views.download_comment_attachment, name='comment_attachment_download'),
+
+    # Bildirim Toplu Okundu İşareti
+    path('notifications/read-all/', views.mark_all_notifications_as_read, name='mark_all_notifications_read'),
+
+    # Raporlama ve Dışa Aktarma (Excel / CSV)
+    path('export/tickets/', views.export_tickets_csv, name='export_tickets_csv'),
+
+    # Toplu İşlemler (Bulk Actions)
+    path('tickets/bulk-action/', views.bulk_ticket_action, name='bulk_ticket_action'),
 ]
 
 

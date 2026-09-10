@@ -1,5 +1,7 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse, HttpResponseForbidden, Http404
+import os
+import mimetypes
 from .models import Ticket
 from .forms import TicketForm,CommentForm, UserRegisterForm # CommentForm sınıfını detay görünümünde kullanabilmek için içeri aktarır.
 from django.contrib.auth.models import User
@@ -437,6 +439,8 @@ def ticket_list(request):
         'urgent_count': urgent_count,
         'user_profile': profile,
         'is_superadmin': is_superadmin,
+        'categories': Category.objects.all(),
+        'staff_users': User.objects.filter(is_staff=True).order_by('username'),
     }
     # Veritabanından çekilen veriyi HTML şablonuna aktarabilmek için bir Python dictionary (sözlük) yapısı oluşturulur.
     # Sözlükteki 'tickets' anahtarı, HTML tarafında bu verilere erişmek için kullanacağımız değişken adı olacaktır.
@@ -883,14 +887,26 @@ def ticket_edit(request, pk):
 def ticket_delete(request, pk):
     """
     Destek talebi silme görünümü.
+    Süper yöneticiler tüm talepleri, personel ise yalnızca sorumlu olduğu departmanın taleplerini silebilir.
     GET isteğinde onay sayfasını gösterir, POST isteğinde talebi kalıcı olarak siler.
     """
     ticket = get_object_or_404(Ticket, pk=pk)
 
-    # Güvenlik Kontrolü: Sadece yöneticiler talep silebilir
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
+
+    # Güvenlik Kontrolü 1: Yalnızca yetkili personel silebilir
     if not request.user.is_staff:
-        messages.error(request, "Destek taleplerini yalnızca yöneticiler silebilir!")
+        messages.error(request, "Destek taleplerini yalnızca yetkili yöneticiler silebilir!")
         return redirect('ticket_list')
+
+    # Güvenlik Kontrolü 2: RBAC Departman İzolasyonu (Personel başka birimin talebini silemez)
+    if not is_superadmin and ticket.category:
+        if profile and profile.assigned_categories.exists():
+            if not profile.assigned_categories.filter(id=ticket.category.id).exists():
+                messages.error(request, "Bu departman/kategoriye ait talepleri silme yetkiniz bulunmamaktadır!")
+                return redirect('ticket_list')
+
     if request.method == 'POST':
         ticket_title = ticket.title
         ticket.delete() # veritabanından tamamen siler.
@@ -1009,6 +1025,17 @@ def mark_notification_as_read(request, pk):
     if notification.ticket:
         return redirect('ticket_detail', pk=notification.ticket.pk)
     return redirect('notifications_list')
+
+
+@login_required
+def mark_all_notifications_as_read(request):
+    """
+    Kullanıcının tüm okunmamış bildirimlerini tek tıkla okundu olarak işaretler.
+    """
+    Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True)
+    messages.success(request, "Tüm bildirimleriniz başarıyla okundu olarak işaretlendi.")
+    next_url = request.GET.get('next') or request.META.get('HTTP_REFERER') or 'notifications_list'
+    return redirect(next_url)
 
    
 
@@ -1437,4 +1464,286 @@ def submit_ticket_rating_api(request, ticket_id):
         'feedback': rating.feedback,
         'message': 'Geri bildiriminiz ve puanınız başarıyla kaydedildi. Teşekkür ederiz! ⭐'
     })
+
+
+# --- GÜVENLİ DOSYA İNDİRME VE AKIŞ GÖRÜNÜMLERİ (SECURE ATTACHMENTS) ---
+
+@login_required
+def download_ticket_attachment(request, pk):
+    """
+    Talebe eklenen dosyayı yetki kontrolü yaparak güvenli bir şekilde sunar veya indirir.
+    Gizli taleplerin doğrudan medya URL'si üzerinden yetkisiz indirilmesini engeller.
+    """
+    ticket = get_object_or_404(Ticket, pk=pk)
+
+    if not ticket.attachment:
+        raise Http404("Bu talebe ait ek dosya bulunamadı.")
+
+    # Gizlilik ve RBAC Kontrolü
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
+
+    if not ticket.is_public and ticket.created_by != request.user and ticket.assigned_to != request.user and not is_superadmin:
+        if not request.user.is_staff:
+            return HttpResponseForbidden("Bu özel talebin ek dosyasını görüntüleme yetkiniz bulunmamaktadır.")
+        elif profile and profile.assigned_categories.exists() and ticket.category:
+            if not profile.assigned_categories.filter(id=ticket.category.id).exists():
+                return HttpResponseForbidden("Bu departman/kategoriye ait ek dosyayı indirme yetkiniz bulunmamaktadır.")
+
+    try:
+        file_path = ticket.attachment.path
+        if not os.path.exists(file_path):
+            raise Http404("Dosya sunucu diskinde bulunamadı.")
+    except (ValueError, NotImplementedError):
+        file_path = None
+
+    filename = ticket.attachment_filename or os.path.basename(ticket.attachment.name)
+    content_type, _ = mimetypes.guess_type(filename)
+    content_type = content_type or 'application/octet-stream'
+
+    # Resim veya PDF ise tarayıcı içinde önizle (inline), download=1 veya diğer formatlarda indir (attachment)
+    is_previewable = content_type.startswith('image/') or content_type == 'application/pdf'
+    force_download = request.GET.get('download') == '1'
+    as_attachment = force_download or (not is_previewable)
+
+    if file_path:
+        response = FileResponse(open(file_path, 'rb'), content_type=content_type, as_attachment=as_attachment, filename=filename)
+    else:
+        response = FileResponse(ticket.attachment.open('rb'), content_type=content_type, as_attachment=as_attachment, filename=filename)
+
+    return response
+
+
+@login_required
+def download_comment_attachment(request, comment_id):
+    """
+    Yorumlara eklenen dosyayı yetki kontrolü yaparak güvenli bir şekilde sunar veya indirir.
+    İç notlara (is_internal) ait dosyaların normal kullanıcılarca erişilmesini engeller.
+    """
+    comment = get_object_or_404(TicketComment, id=comment_id)
+    ticket = comment.ticket
+
+    if not comment.attachment:
+        raise Http404("Bu yoruma ait ek dosya bulunamadı.")
+
+    # İç not eki kontrolü: Yalnızca yetkililer görebilir
+    if comment.is_internal and not request.user.is_staff:
+        return HttpResponseForbidden("Yöneticilere özel iç not dosyalarına erişim yetkiniz bulunmamaktadır.")
+
+    # Talep Gizlilik ve RBAC Kontrolü
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
+
+    if not ticket.is_public and ticket.created_by != request.user and ticket.assigned_to != request.user and not is_superadmin:
+        if not request.user.is_staff:
+            return HttpResponseForbidden("Bu özel talebin yorum ekini görüntüleme yetkiniz bulunmamaktadır.")
+        elif profile and profile.assigned_categories.exists() and ticket.category:
+            if not profile.assigned_categories.filter(id=ticket.category.id).exists():
+                return HttpResponseForbidden("Bu departman/kategoriye ait yorum ekini indirme yetkiniz bulunmamaktadır.")
+
+    try:
+        file_path = comment.attachment.path
+        if not os.path.exists(file_path):
+            raise Http404("Dosya sunucu diskinde bulunamadı.")
+    except (ValueError, NotImplementedError):
+        file_path = None
+
+    filename = comment.attachment_filename or os.path.basename(comment.attachment.name)
+    content_type, _ = mimetypes.guess_type(filename)
+    content_type = content_type or 'application/octet-stream'
+
+    is_previewable = content_type.startswith('image/') or content_type == 'application/pdf'
+    force_download = request.GET.get('download') == '1'
+    as_attachment = force_download or (not is_previewable)
+
+    if file_path:
+        response = FileResponse(open(file_path, 'rb'), content_type=content_type, as_attachment=as_attachment, filename=filename)
+    else:
+        response = FileResponse(comment.attachment.open('rb'), content_type=content_type, as_attachment=as_attachment, filename=filename)
+
+    return response
+
+
+# --- RAPOR DIŞA AKTARMA (EXCEL / CSV EXPORT) ---
+
+import csv
+from django.http import HttpResponse
+
+@login_required
+def export_tickets_csv(request):
+    """
+    Destek taleplerini Excel uyumlu CSV (UTF-8 BOM ve ';' ayracı) formatında dışa aktarır.
+    Aktif filtreleri ve RBAC departman yetkilendirmesini uygular.
+    """
+    if not request.user.is_staff:
+        messages.error(request, "Rapor dışa aktarma yetkiniz bulunmamaktadır!")
+        return redirect('ticket_list')
+
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
+
+    # 1. RBAC Kapsamı
+    if is_superadmin:
+        base_qs = Ticket.objects.all()
+    elif profile and profile.assigned_categories.exists():
+        allowed_cats = profile.assigned_categories.all()
+        base_qs = Ticket.objects.filter(
+            Q(category__in=allowed_cats) | Q(assigned_to=request.user)
+        ).distinct()
+    else:
+        base_qs = Ticket.objects.all()
+
+    # 2. Filtre Parametreleri
+    q = request.GET.get('q', '').strip()
+    status = request.GET.get('status', '').strip()
+    priority = request.GET.get('priority', '').strip()
+    category_id = request.GET.get('category', '').strip()
+    mine = request.GET.get('mine') == '1'
+
+    tickets = base_qs
+    if q:
+        tickets = tickets.filter(Q(title__icontains=q) | Q(description__icontains=q))
+    if status:
+        tickets = tickets.filter(status=status)
+    if priority:
+        tickets = tickets.filter(priority=priority)
+    if category_id:
+        tickets = tickets.filter(category_id=category_id)
+    if mine:
+        tickets = tickets.filter(created_by=request.user)
+
+    tickets = tickets.select_related('created_by', 'category', 'assigned_to').prefetch_related('comments').order_by('-created_at')
+
+    # 3. CSV Yanıtı (Windows Excel Türkçe karakter uyumu için utf-8-sig ve ';' ayracı)
+    response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    filename = f"destek_talepleri_raporu_{timezone.now().strftime('%Y%m%d_%H%M')}.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+    writer = csv.writer(response, delimiter=';')
+    writer.writerow([
+        'Talep No', 'Başlık', 'Kategori', 'Öncelik', 'Durum',
+        'Oluşturan', 'Atanan Yönetici', 'Gizlilik', 'Oluşturulma Tarihi',
+        'Son Güncelleme', 'İlk Yanıt Tarihi', 'SLA Durumu', 'Yorum Sayısı'
+    ])
+
+    for t in tickets:
+        sla_text = "SLA Aşıldı" if t.is_sla_breached else ("İlk Yanıt Verildi" if t.first_response_at else "Zamanında Devam Ediyor")
+        writer.writerow([
+            t.ticket_number,
+            t.title,
+            t.category.name if t.category else "Kategorisiz",
+            t.get_priority_display(),
+            t.get_status_display(),
+            t.created_by.username,
+            t.assigned_to.username if t.assigned_to else "Atanmadı",
+            "Herkese Açık" if t.is_public else "Özel / Gizli",
+            t.created_at.strftime('%d.%m.%Y %H:%M') if t.created_at else "",
+            t.updated_at.strftime('%d.%m.%Y %H:%M') if t.updated_at else "",
+            t.first_response_at.strftime('%d.%m.%Y %H:%M') if t.first_response_at else "Henüz Yanıtlanmadı",
+            sla_text,
+            t.comments.count()
+        ])
+
+    return response
+
+
+# --- TOPLU İŞLEMLER (BULK ACTIONS) ---
+
+@login_required
+def bulk_ticket_action(request):
+    """
+    Talep listesinde seçilen birden fazla talep üzerinde toplu işlem uygular (Durum Değiştirme, Atama, Kategori).
+    """
+    if request.method != 'POST':
+        return redirect('ticket_list')
+
+    if not request.user.is_staff:
+        messages.error(request, "Toplu işlem yapma yetkiniz bulunmamaktadır!")
+        return redirect('ticket_list')
+
+    selected_ids = request.POST.getlist('selected_tickets')
+    action = request.POST.get('bulk_action', '').strip()
+    target_value = request.POST.get('bulk_target_value', '').strip()
+
+    if not selected_ids:
+        messages.warning(request, "Lütfen işlem uygulamak için en az bir talep seçiniz.")
+        return redirect('ticket_list')
+
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
+
+    # Yetkili olunan talepleri filtrele
+    tickets = Ticket.objects.filter(id__in=selected_ids)
+    if not is_superadmin and profile and profile.assigned_categories.exists():
+        tickets = tickets.filter(
+            Q(category__in=profile.assigned_categories.all()) | Q(assigned_to=request.user)
+        )
+
+    updated_count = 0
+
+    if action == 'status':
+        valid_statuses = dict(Ticket.STATUS_CHOICES).keys()
+        if target_value in valid_statuses:
+            for t in tickets:
+                old_status = t.get_status_display()
+                t.status = target_value
+                t.save(update_fields=['status', 'updated_at'])
+                TicketActivityLog.objects.create(
+                    ticket=t,
+                    actor=request.user,
+                    action=f"Toplu İşlem: Durum '{old_status}' ➔ '{t.get_status_display()}' olarak güncellendi."
+                )
+                updated_count += 1
+            messages.success(request, f"{updated_count} adet talebin durumu başarıyla güncellendi.")
+        else:
+            messages.error(request, "Geçersiz durum seçimi.")
+
+    elif action == 'assign':
+        if target_value == 'unassign':
+            for t in tickets:
+                t.assigned_to = None
+                t.save(update_fields=['assigned_to', 'updated_at'])
+                TicketActivityLog.objects.create(
+                    ticket=t,
+                    actor=request.user,
+                    action="Toplu İşlem: Atanan yönetici kaldırıldı."
+                )
+                updated_count += 1
+            messages.success(request, f"{updated_count} adet talebin ataması kaldırıldı.")
+        else:
+            try:
+                assignee = User.objects.get(id=int(target_value), is_staff=True)
+                for t in tickets:
+                    t.assigned_to = assignee
+                    t.save(update_fields=['assigned_to', 'updated_at'])
+                    TicketActivityLog.objects.create(
+                        ticket=t,
+                        actor=request.user,
+                        action=f"Toplu İşlem: Talep {assignee.username} yöneticisine atandı."
+                    )
+                    updated_count += 1
+                messages.success(request, f"{updated_count} adet talep {assignee.username} yöneticisine atandı.")
+            except (ValueError, User.DoesNotExist):
+                messages.error(request, "Seçilen yönetici bulunamadı.")
+
+    elif action == 'category':
+        try:
+            new_cat = Category.objects.get(id=int(target_value))
+            for t in tickets:
+                old_cat_name = t.category.name if t.category else "Kategorisiz"
+                t.category = new_cat
+                t.save(update_fields=['category', 'updated_at'])
+                TicketActivityLog.objects.create(
+                    ticket=t,
+                    actor=request.user,
+                    action=f"Toplu İşlem: Kategori '{old_cat_name}' ➔ '{new_cat.name}' olarak değiştirildi."
+                )
+                updated_count += 1
+            messages.success(request, f"{updated_count} adet talebin kategorisi güncellendi.")
+        except (ValueError, Category.DoesNotExist):
+            messages.error(request, "Seçilen kategori bulunamadı.")
+    else:
+        messages.warning(request, "Geçersiz işlem seçildi.")
+
+    return redirect('ticket_list')
 

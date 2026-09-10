@@ -10,6 +10,11 @@
                 <h4 class="mb-0 fw-bold text-dark fs-5">
                     <i class="bi bi-bell me-2 text-primary"></i>Bildirimlerim
                 </h4>
+                {% if notifications %}
+                <a href="{% url 'mark_all_notifications_read' %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-semibold">
+                    <i class="bi bi-check2-all me-1"></i> Tümünü Okundu İşaretle
+                </a>
+                {% endif %}
             </div>
             <div class="card-body p-0">
                 {% if notifications %}

@@ -63,6 +63,54 @@ class Category(models.Model):
         #Kategori nesnesi çağrıldığında karmaşık bir kod yerine doğrudan kategori adını (ör. "Yazılım") döndürür.
 
 
+def add_business_hours(start_dt, hours):
+    """
+    Hafta içi 09:00 - 18:00 mesai saatlerine göre hedef teslim tarihini hesaplar.
+    Hafta sonlarını (Cumartesi, Pazar) ve mesai dışı saatleri atlar.
+    """
+    from datetime import time, timedelta
+    from django.utils import timezone
+
+    if not start_dt:
+        return None
+
+    tz = timezone.get_current_timezone()
+    current = start_dt.astimezone(tz) if timezone.is_aware(start_dt) else timezone.make_aware(start_dt, tz)
+
+    WORK_START = time(9, 0)
+    WORK_END = time(18, 0)
+
+    # 1. Başlangıç anı hafta sonu ise ilk Pazartesi 09:00'a taşı
+    while current.weekday() in (5, 6):
+        current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+
+    # 2. Hafta içi mesai öncesi ise 09:00'a taşı
+    if current.time() < WORK_START:
+        current = current.replace(hour=9, minute=0, second=0, microsecond=0)
+    # Hafta içi mesai sonrası ise ertesi iş günü 09:00'a taşı
+    elif current.time() >= WORK_END:
+        current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+        while current.weekday() in (5, 6):
+            current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+
+    remaining_minutes = int(hours * 60)
+
+    while remaining_minutes > 0:
+        day_end = current.replace(hour=18, minute=0, second=0, microsecond=0)
+        minutes_left_today = int((day_end - current).total_seconds() // 60)
+
+        if remaining_minutes <= minutes_left_today:
+            current = current + timedelta(minutes=remaining_minutes)
+            remaining_minutes = 0
+        else:
+            remaining_minutes -= minutes_left_today
+            current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+            while current.weekday() in (5, 6):
+                current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+
+    return current
+
+
 class Ticket(models.Model):
     #Ticket adında bir model tanımlandı (veri tabanına Ticket isimli bir tablo oluştu)
     #Destek talepleri tablosunu tanımlar.
@@ -219,10 +267,9 @@ class Ticket(models.Model):
 
     @property
     def sla_deadline(self):
-        """SLA son yanıt tarihi."""
-        from datetime import timedelta
+        """SLA son yanıt tarihi (Hafta içi 09:00 - 18:00 mesai saatlerine duyarlı)."""
         if self.created_at:
-            return self.created_at + timedelta(hours=self.sla_target_hours)
+            return add_business_hours(self.created_at, self.sla_target_hours)
         return None
 
     @property

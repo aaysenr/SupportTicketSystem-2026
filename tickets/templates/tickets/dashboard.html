@@ -8,7 +8,7 @@
 
 <!-- GÖRSEL OLARAK İYİLEŞTİRİLMİŞ TÜRKÇE BAŞLIK KART -->
 <div class="card border-0 shadow-sm mb-4">
-    <div class="card-body p-4 d-flex justify-content-between align-items-center">
+    <div class="card-body p-4 d-flex justify-content-between align-items-center flex-wrap gap-3">
         <div class="d-flex align-items-center">
             <div class="bg-primary bg-opacity-10 text-primary p-3 rounded-4 me-3 d-flex align-items-center justify-content-center">
                 <i class="bi bi-graph-up-arrow fs-3"></i>
@@ -18,7 +18,10 @@
                 <p class="text-muted small mb-0">Destek sisteminizin anlık durum, kategori ve öncelik analizleri</p>
             </div>
         </div>
-                <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <a href="{% url 'export_tickets_csv' %}" class="btn btn-success btn-sm px-3 py-2 fw-semibold shadow-xs">
+                <i class="bi bi-file-earmark-spreadsheet-fill me-1"></i> Excel / CSV Rapor İndir
+            </a>
             <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm px-3 py-2 fw-semibold">
                 <i class="bi bi-arrow-left me-1"></i> Talepler Listesine Dön
             </a>
