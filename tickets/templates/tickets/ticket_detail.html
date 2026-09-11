@@ -110,7 +110,10 @@
                     <div class="text-body-secondary mb-1">
                         <i class="bi bi-person-fill text-primary me-1"></i><strong>Oluşturan</strong>
                     </div>
-                    <div>
+                    <div class="d-flex align-items-center gap-1.5">
+                        {% if ticket.created_by.profile.avatar_url %}
+                            <img src="{{ ticket.created_by.profile.avatar_url }}" alt="{{ ticket.created_by.username }}" class="rounded-circle border" style="width: 22px; height: 22px; object-fit: cover;">
+                        {% endif %}
                         <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">{{ ticket.created_by.username }}</span>
                     </div>
                 </div>
@@ -120,8 +123,11 @@
                     <div class="text-body-secondary mb-1">
                         <i class="bi bi-person-badge-fill text-info me-1"></i><strong>Atanan Yönetici</strong>
                     </div>
-                    <div>
+                    <div class="d-flex align-items-center gap-1.5">
                         {% if ticket.assigned_to %}
+                            {% if ticket.assigned_to.profile.avatar_url %}
+                                <img src="{{ ticket.assigned_to.profile.avatar_url }}" alt="{{ ticket.assigned_to.username }}" class="rounded-circle border" style="width: 22px; height: 22px; object-fit: cover;">
+                            {% endif %}
                             <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">{{ ticket.assigned_to.username }}</span>
                         {% else %}
                             <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">Atanmadı</span>
@@ -227,10 +233,10 @@
                 <!-- Resim ise önizleme göster, değilse dosya kutusu göster -->
                 {% if ".png" in ext or ".jpg" in ext or ".jpeg" in ext or ".webp" in ext or ".gif" in ext or ".svg" in ext %}
                     <div class="mt-2 text-center p-2 bg-body rounded border">
-                        <a href="{% url 'ticket_attachment_download' ticket.id %}" target="_blank" title="Tam boyutta açmak için tıklayın">
-                            <img src="{% url 'ticket_attachment_download' ticket.id %}" alt="Ek Görsel" class="img-fluid rounded shadow-sm border" style="max-height: 380px; object-fit: contain;">
+                        <a href="{% url 'ticket_attachment_download' ticket.id %}" class="lightbox-trigger d-inline-block" data-img-src="{% url 'ticket_attachment_download' ticket.id %}" data-img-title="Talep Eki: {{ ticket.attachment_filename }}" title="Önizlemek için tıklayın">
+                            <img src="{% url 'ticket_attachment_download' ticket.id %}" alt="Ek Görsel" class="img-fluid rounded shadow-sm border" style="max-height: 380px; object-fit: contain; cursor: zoom-in;">
                         </a>
-                        <div class="small text-muted mt-1"><i class="bi bi-zoom-in me-1"></i>Tam boyutta açmak için görsele tıklayın</div>
+                        <div class="small text-muted mt-1"><i class="bi bi-arrows-fullscreen me-1"></i>Büyütmek için görsele tıklayın (Modal Önizleme)</div>
                     </div>
                 {% else %}
                     <div class="p-3 bg-body rounded border d-flex align-items-center gap-3 mt-2">
@@ -416,8 +422,15 @@
             <!-- Yorum Başlığı (Kullanıcı & Tarih) -->
             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2">
+                    {% if comment.author.profile.avatar_url %}
+                        <img src="{{ comment.author.profile.avatar_url }}" alt="{{ comment.author.username }}" class="rounded-circle border border-primary-subtle shadow-sm" style="width: 30px; height: 30px; object-fit: cover;">
+                    {% else %}
+                        <div class="rounded-circle bg-primary-subtle text-primary border border-primary-subtle d-flex align-items-center justify-content-center fw-bold small" style="width: 30px; height: 30px; font-size: 0.75rem;">
+                            {{ comment.author.username|slice:":2"|upper }}
+                        </div>
+                    {% endif %}
                     <strong class="text-body">
-                        <i class="bi bi-person-circle me-1 text-primary"></i>{{ comment.author.username }}
+                        {{ comment.author.username }}
                     </strong>
                     {% if comment.author.is_staff %}
                     <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle rounded-pill small">Yetkili</span>
@@ -429,11 +442,16 @@
                     <span class="badge bg-warning text-dark rounded-pill ms-1"><i class="bi bi-lock-fill me-1"></i>Gizli İç Not</span>
                     {% endif %}
                 </div>
-                <small class="text-body-secondary"><i class="bi bi-clock me-1"></i>{{ comment.created_at|date:"d.m.Y H:i" }}</small>
+                <div class="d-flex align-items-center gap-2">
+                    {% if comment.updated_at and comment.updated_at > comment.created_at %}
+                        <small class="text-muted fst-italic" title="Son güncelleme: {{ comment.updated_at|date:'d.m.Y H:i' }}">(düzenlendi)</small>
+                    {% endif %}
+                    <small class="text-body-secondary"><i class="bi bi-clock me-1"></i>{{ comment.created_at|date:"d.m.Y H:i" }}</small>
+                </div>
             </div>
 
             <!-- Yorum Metni (Geçerli HTML5: div içi linebreaks) -->
-            <div class="comment-content text-body mb-2" style="font-size: 0.95rem; line-height: 1.6;">
+            <div class="comment-content text-body mb-2" id="comment-text-{{ comment.id }}" style="font-size: 0.95rem; line-height: 1.6;">
                 {{ comment.content|linebreaks }}
             </div>
 
@@ -451,10 +469,10 @@
                             </a>
                         </div>
                         <div class="text-center p-2 bg-body rounded border">
-                            <a href="{% url 'comment_attachment_download' comment.id %}" target="_blank" title="Tam boyutta açmak için tıklayın">
-                                <img src="{% url 'comment_attachment_download' comment.id %}" alt="Yorum Eki" class="img-fluid rounded border shadow-sm" style="max-height: 280px; object-fit: contain;">
+                            <a href="{% url 'comment_attachment_download' comment.id %}" class="lightbox-trigger d-inline-block" data-img-src="{% url 'comment_attachment_download' comment.id %}" data-img-title="Yorum Eki: {{ comment.attachment_filename }}" title="Büyütmek için tıklayın">
+                                <img src="{% url 'comment_attachment_download' comment.id %}" alt="Yorum Eki" class="img-fluid rounded border shadow-sm" style="max-height: 280px; object-fit: contain; cursor: zoom-in;">
                             </a>
-                            <div class="small text-muted mt-1"><i class="bi bi-zoom-in me-1"></i>Tam boyutta açmak için görsele tıklayın</div>
+                            <div class="small text-muted mt-1"><i class="bi bi-arrows-fullscreen me-1"></i>Büyütmek için görsele tıklayın (Modal Önizleme)</div>
                         </div>
                     {% else %}
                         <div class="p-3 bg-body rounded-3 border d-flex align-items-center justify-content-between flex-wrap gap-2">
@@ -493,7 +511,7 @@
             {% endif %}
 
             <!-- YORUM ETKİLEŞİM VE ÇÖZÜM BUTONLARI -->
-            <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top border-secondary-subtle">
+            <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top border-secondary-subtle flex-wrap gap-2">
                 <!-- Faydalı (Beğen) Butonu - AJAX Desteği ile Kesintisiz Çalışır -->
                 <div>
                     <button type="button" 
@@ -504,9 +522,31 @@
                     </button>
                 </div>
 
-                <!-- Çözüm İşaretleme Butonu (Sadece Talep Sahibi veya Yönetici Görebilir) -->
-                {% if request.user == ticket.created_by or request.user.is_staff %}
-                <div>
+                <!-- Yorum İşlemleri: Düzenle / Sil & Çözüm İşaretleme -->
+                <div class="d-flex align-items-center gap-2">
+                    {% if request.user == comment.author or request.user.is_staff or request.user.is_superuser %}
+                        <!-- Düzenle Butonu -->
+                        <button type="button" 
+                                class="btn btn-sm btn-outline-secondary rounded-pill px-2.5 btn-edit-comment" 
+                                data-comment-id="{{ comment.id }}"
+                                data-edit-url="{% url 'comment_edit' comment.id %}"
+                                data-comment-raw="{{ comment.content }}"
+                                title="Yorumu Düzenle">
+                            <i class="bi bi-pencil me-1"></i>Düzenle
+                        </button>
+
+                        <!-- Sil Butonu -->
+                        <button type="button" 
+                                class="btn btn-sm btn-outline-danger rounded-pill px-2.5 btn-delete-comment" 
+                                data-comment-id="{{ comment.id }}"
+                                data-delete-url="{% url 'comment_delete' comment.id %}"
+                                title="Yorumu Sil">
+                            <i class="bi bi-trash3 me-1"></i>Sil
+                        </button>
+                    {% endif %}
+
+                    <!-- Çözüm İşaretleme Butonu (Sadece Talep Sahibi veya Yönetici Görebilir) -->
+                    {% if request.user == ticket.created_by or request.user.is_staff %}
                     <button type="button"
                             data-url="{% url 'toggle_comment_solution' comment.id %}"
                             data-comment-id="{{ comment.id }}"
@@ -518,8 +558,8 @@
                             <i class="bi bi-check-circle me-1"></i>Çözüm Olarak İşaretle ✅
                         {% endif %}
                     </button>
+                    {% endif %}
                 </div>
-                {% endif %}
             </div>
 
         </div>
@@ -618,6 +658,88 @@
                 </button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- YORUM DÜZENLEME MODALI -->
+<div class="modal fade" id="editCommentModal" tabindex="-1" aria-labelledby="editCommentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold" id="editCommentModalLabel">
+                    <i class="bi bi-pencil-square text-primary me-2"></i>Yorumu Düzenle
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <form id="editCommentForm" method="POST" action="">
+                {% csrf_token %}
+                <div class="modal-body py-3">
+                    <div class="mb-2">
+                        <label for="editCommentTextarea" class="form-label small fw-bold text-muted">Yanıt Metni</label>
+                        <textarea class="form-control" id="editCommentTextarea" name="content" rows="4" required placeholder="Yanıtınızı güncelleyin..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-light rounded-pill px-3" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary rounded-pill px-4 fw-semibold" id="btnSaveComment">
+                        <i class="bi bi-check2 me-1"></i>Kaydet
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- YORUM SİLME ONAY MODALI -->
+<div class="modal fade" id="deleteCommentModal" tabindex="-1" aria-labelledby="deleteCommentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold text-danger" id="deleteCommentModalLabel">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>Yorumu Sil
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body py-3 small text-muted">
+                Bu yanıtı silmek istediğinize emin misiniz? Varsa ekli dosya da kalıcı olarak diskten silinecektir.
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-light btn-sm rounded-pill px-3" data-bs-dismiss="modal">Vazgeç</button>
+                <form id="deleteCommentForm" method="POST" action="" style="display:inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger btn-sm rounded-pill px-3 fw-semibold">
+                        <i class="bi bi-trash3 me-1"></i>Evet, Sil
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- GÖRSEL ÖNİZLEME (LIGHTBOX) MODAL -->
+<div class="modal fade" id="imageLightboxModal" tabindex="-1" aria-labelledby="imageLightboxModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content bg-dark border-0 text-white shadow-lg overflow-hidden">
+            <div class="modal-header border-0 py-2 px-3 bg-black bg-opacity-75">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi bi-image text-primary fs-5"></i>
+                    <h6 class="modal-title fw-bold text-truncate mb-0 text-white" id="imageLightboxModalLabel" style="max-width: 500px;">Görsel Önizleme</h6>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <a id="lightboxDownloadBtn" href="#" download class="btn btn-sm btn-outline-light rounded-pill px-3 py-1">
+                        <i class="bi bi-download me-1"></i>İndir
+                    </a>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+                </div>
+            </div>
+            <div class="modal-body p-0 text-center bg-black d-flex justify-content-center align-items-center" style="min-height: 350px; max-height: 82vh;">
+                <img id="lightboxImage" src="" alt="Önizleme" class="img-fluid" style="max-height: 80vh; max-width: 100%; object-fit: contain;">
+            </div>
+            <div class="modal-footer border-0 py-2 px-3 bg-black bg-opacity-75 justify-content-between small text-white-50">
+                <span><i class="bi bi-info-circle me-1"></i>Görseli büyütmek veya tam kalitede indirmek için butonu kullanabilirsiniz.</span>
+                <button type="button" class="btn btn-sm btn-secondary rounded-pill px-3" data-bs-dismiss="modal">Kapat</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1088,6 +1210,140 @@ document.addEventListener('DOMContentLoaded', function () {
         if (refreshSummaryBtn) {
             refreshSummaryBtn.addEventListener('click', fetchAiSummary);
         }
+    }
+
+    // ==========================================
+    // 3.4. LIGHTBOX GÖRSEL ÖNİZLEME
+    // ==========================================
+    const lightboxModalEl = document.getElementById('imageLightboxModal');
+    const lightboxModal = lightboxModalEl ? new bootstrap.Modal(lightboxModalEl) : null;
+    const lightboxImg = document.getElementById('lightboxImage');
+    const lightboxTitle = document.getElementById('imageLightboxModalLabel');
+    const lightboxDownload = document.getElementById('lightboxDownloadBtn');
+
+    document.querySelectorAll('.lightbox-trigger').forEach(function (trigger) {
+        trigger.addEventListener('click', function (e) {
+            e.preventDefault();
+            const src = this.getAttribute('data-img-src') || this.getAttribute('href');
+            const title = this.getAttribute('data-img-title') || 'Görsel Önizleme';
+            if (lightboxImg) lightboxImg.src = src;
+            if (lightboxTitle) lightboxTitle.textContent = title;
+            if (lightboxDownload) lightboxDownload.href = src + (src.includes('?') ? '&download=1' : '?download=1');
+            if (lightboxModal) lightboxModal.show();
+        });
+    });
+
+    // ==========================================
+    // 3.3. YORUM DÜZENLEME & SİLME AJAX MODALLARI
+    // ==========================================
+    const editModalEl = document.getElementById('editCommentModal');
+    const editModal = editModalEl ? new bootstrap.Modal(editModalEl) : null;
+    const editForm = document.getElementById('editCommentForm');
+    const editTextarea = document.getElementById('editCommentTextarea');
+
+    document.querySelectorAll('.btn-edit-comment').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const editUrl = this.getAttribute('data-edit-url');
+            const rawContent = this.getAttribute('data-comment-raw');
+            if (editForm) editForm.action = editUrl;
+            if (editTextarea) editTextarea.value = rawContent;
+            if (editModal) editModal.show();
+        });
+    });
+
+    if (editForm) {
+        editForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            const url = this.action;
+            const content = editTextarea.value.trim();
+            if (!content) return;
+
+            const submitBtn = document.getElementById('btnSaveComment');
+            if (submitBtn) submitBtn.disabled = true;
+
+            const formData = new FormData(editForm);
+
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (submitBtn) submitBtn.disabled = false;
+                if (data.status === 'ok') {
+                    if (editModal) editModal.hide();
+                    const contentContainer = document.getElementById('comment-text-' + data.comment_id);
+                    if (contentContainer) {
+                        contentContainer.innerHTML = data.content.replace(/\n/g, '<br>');
+                    }
+                    const editBtn = document.querySelector(`.btn-edit-comment[data-comment-id="${data.comment_id}"]`);
+                    if (editBtn) editBtn.setAttribute('data-comment-raw', data.content);
+                } else {
+                    alert(data.message || 'Yorum güncellenemedi.');
+                }
+            })
+            .catch(() => {
+                editForm.submit();
+            });
+        });
+    }
+
+    const deleteModalEl = document.getElementById('deleteCommentModal');
+    const deleteModal = deleteModalEl ? new bootstrap.Modal(deleteModalEl) : null;
+    const deleteForm = document.getElementById('deleteCommentForm');
+
+    document.querySelectorAll('.btn-delete-comment').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const deleteUrl = this.getAttribute('data-delete-url');
+            if (deleteForm) deleteForm.action = deleteUrl;
+            if (deleteModal) deleteModal.show();
+        });
+    });
+
+    if (deleteForm) {
+        deleteForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            const url = this.action;
+            const formData = new FormData(deleteForm);
+
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    if (deleteModal) deleteModal.hide();
+                    const commentEl = document.getElementById('comment-item-' + data.comment_id);
+                    if (commentEl) {
+                        commentEl.style.transition = 'all 0.3s ease';
+                        commentEl.style.opacity = '0';
+                        commentEl.style.transform = 'translateY(-10px)';
+                        setTimeout(() => {
+                            commentEl.remove();
+                            const totalCountSpan = document.getElementById('total-comments-count');
+                            if (totalCountSpan) {
+                                const cur = parseInt(totalCountSpan.textContent, 10);
+                                if (!isNaN(cur) && cur > 0) totalCountSpan.textContent = cur - 1;
+                            }
+                        }, 300);
+                    }
+                } else {
+                    alert(data.message || 'Yorum silinemedi.');
+                }
+            })
+            .catch(() => {
+                deleteForm.submit();
+            });
+        });
     }
 });
 </script>

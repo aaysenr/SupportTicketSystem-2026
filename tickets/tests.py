@@ -946,6 +946,105 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertEqual(deadline.hour, 11)
         self.assertEqual(deadline.minute, 0)
 
+    # 7. KULLANICI DENEYİMİ (UX / UI) İYİLEŞTİRMELERİ TESTLERİ (3.1 - 3.4)
+    def test_branded_html_email_template_rendering(self):
+        """Zengin HTML e-posta şablonunun talep detaylarıyla hatasız derlendiğini doğrula (3.1)."""
+        from django.template.loader import render_to_string
+        html = render_to_string('emails/ticket_notification_email.html', {
+            'subject': 'Talep Güncellemesi',
+            'message': 'Talebiniz inceleniyor.',
+            'ticket': self.ticket_tech,
+            'action_url': 'http://testserver/tickets/1/'
+        })
+        self.assertIn("Destek Masası", html)
+        self.assertIn(self.ticket_tech.ticket_number, html)
+        self.assertIn("Talebiniz inceleniyor.", html)
+        self.assertIn("Talebi ve Detayları Görüntüle", html)
+
+    def test_user_profile_avatar_upload_and_post_delete(self):
+        """Kullanıcının profil fotoğrafı yükleyebildiğini ve profil silindiğinde avatarın temizlendiğini doğrula (3.2)."""
+        from django.core.files.storage import default_storage
+        from io import BytesIO
+        from PIL import Image
+
+        # 1x1 test görseli oluştur
+        image_io = BytesIO()
+        img = Image.new('RGB', (100, 100), color='blue')
+        img.save(image_io, format='PNG')
+        image_io.seek(0)
+        avatar_file = SimpleUploadedFile("my_avatar.png", image_io.read(), content_type="image/png")
+
+        self.client.login(username='john_doe', password='UserPass123!')
+        res = self.client.post(reverse('profile'), {
+            'first_name': 'John',
+            'last_name': 'Doe',
+            'username': 'john_doe',
+            'email': 'john_doe@example.com',
+            'current_password': 'UserPass123!',
+            'avatar': avatar_file
+        })
+        self.assertEqual(res.status_code, 302)
+
+        self.normal_user.profile.refresh_from_db()
+        self.assertTrue(bool(self.normal_user.profile.avatar))
+        avatar_name = self.normal_user.profile.avatar.name
+        self.assertTrue(default_storage.exists(avatar_name))
+
+        # UserProfile silindiğinde post_delete sinyaliyle dosyanın temizlendiğini doğrula
+        self.normal_user.profile.delete()
+        self.assertFalse(default_storage.exists(avatar_name))
+
+    def test_comment_edit_permissions_and_functionality(self):
+        """Yorum düzenleme yetkilerini ve içerik güncellemesini doğrula (3.3)."""
+        comment = TicketComment.objects.create(
+            ticket=self.ticket_tech,
+            author=self.normal_user,
+            content="İlk orijinal yorum metni"
+        )
+        edit_url = reverse('comment_edit', kwargs={'comment_id': comment.id})
+
+        # 1. Giriş yapmamış kullanıcı -> 302
+        res_anon = self.client.post(edit_url, {'content': 'Yeni metin'})
+        self.assertEqual(res_anon.status_code, 302)
+
+        # 2. Yetkisiz başka bir standart kullanıcı -> 403 Forbidden
+        other_user = User.objects.create_user(username='other_user', password='OtherPass123!', email='other@example.com')
+        self.client.login(username='other_user', password='OtherPass123!')
+        res_other = self.client.post(edit_url, {'content': 'Yetkisiz deneme'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(res_other.status_code, 403)
+
+        # 3. Yorum yazarı kendi yorumunu AJAX ile düzenler -> 200 OK
+        self.client.login(username='john_doe', password='UserPass123!')
+        res_owner = self.client.post(edit_url, {'content': 'Düzenlenmiş yeni metin'}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(res_owner.status_code, 200)
+        self.assertEqual(res_owner.json()['status'], 'ok')
+        comment.refresh_from_db()
+        self.assertEqual(comment.content, 'Düzenlenmiş yeni metin')
+
+    def test_comment_delete_and_attachment_cleanup(self):
+        """Yorum silindiğinde veritabanından kaldırıldığını ve ek dosyanın diskten silindiğini doğrula (3.3)."""
+        from django.core.files.storage import default_storage
+        sample_file = SimpleUploadedFile("comment_att.png", b"fake_png_data", content_type="image/png")
+        comment = TicketComment.objects.create(
+            ticket=self.ticket_tech,
+            author=self.normal_user,
+            content="Silinecek yorum",
+            attachment=sample_file
+        )
+        att_name = comment.attachment.name
+        self.assertTrue(default_storage.exists(att_name))
+        delete_url = reverse('comment_delete', kwargs={'comment_id': comment.id})
+
+        # Yorum sahibi yorumu siler
+        self.client.login(username='john_doe', password='UserPass123!')
+        res = self.client.post(delete_url, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()['status'], 'ok')
+
+        self.assertFalse(TicketComment.objects.filter(id=comment.id).exists())
+        self.assertFalse(default_storage.exists(att_name))
+
+
 
 
 

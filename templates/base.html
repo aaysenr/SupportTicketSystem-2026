@@ -182,8 +182,13 @@
                     </div>
 
                     <!-- PROFİLİM VE ÇIKIŞ YAP -->
-                    <a href="{% url 'profile' %}" class="btn btn-outline-light btn-sm me-2">
-                      <i class="bi bi-person-circle me-1"></i><strong>{{ user.username }}</strong> (Profilim)
+                    <a href="{% url 'profile' %}" class="btn btn-outline-light btn-sm me-2 d-inline-flex align-items-center gap-1" title="Profil Ayarları">
+                      {% if user.profile.avatar_url %}
+                        <img src="{{ user.profile.avatar_url }}" alt="{{ user.username }}" class="rounded-circle border border-white" style="width: 20px; height: 20px; object-fit: cover;">
+                      {% else %}
+                        <i class="bi bi-person-circle"></i>
+                      {% endif %}
+                      <strong>{{ user.username }}</strong> <span class="d-none d-sm-inline opacity-75">(Profilim)</span>
                     </a>
                     <a href="{% url 'logout' %}" class="btn btn-outline-light btn-sm">
                         <i class="bi bi-box-arrow-right me-1"></i> Çıkış Yap

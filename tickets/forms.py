@@ -226,12 +226,18 @@ class UserRegisterForm(UserCreationForm):
 
 class UserProfileForm(forms.ModelForm):
     """
-    Kullanıcı profil bilgilerini (ad, soyad, kullanıcı adı ve e-posta) güncelleme formu.
+    Kullanıcı profil bilgilerini (ad, soyad, kullanıcı adı, e-posta ve avatar) güncelleme formu.
     Güvenlik için mevcut şifre onayı gerektirir.
     """
     first_name = forms.CharField(max_length=150, required=False, label="Ad")
     last_name = forms.CharField(max_length=150, required=False, label="Soyad")
     email = forms.EmailField(required=True, label="E-posta Adresi")
+    avatar = forms.ImageField(
+        required=False,
+        label="Profil Fotoğrafı (Opsiyonel)",
+        validators=[validate_file_security],
+        widget=forms.FileInput(attrs={'accept': 'image/*'})
+    )
     
     # Güvenlik için eklendi:
     current_password = forms.CharField(
@@ -262,3 +268,31 @@ class UserProfileForm(forms.ModelForm):
         if self.user and not self.user.check_password(current_password):
             raise forms.ValidationError("Profil bilgilerinizi güncellemek için mevcut şifrenizi doğru girmelisiniz.")
         return current_password
+
+    def save(self, commit=True):
+        user = super().save(commit=commit)
+        if 'avatar' in self.cleaned_data:
+            avatar = self.cleaned_data.get('avatar')
+            if avatar:
+                from .models import UserProfile
+                profile, _ = UserProfile.objects.get_or_create(user=user)
+                if profile.avatar and profile.avatar.name and profile.avatar != avatar:
+                    profile.avatar.delete(save=False)
+                profile.avatar = avatar
+                profile.save()
+        return user
+
+
+class CommentEditForm(forms.ModelForm):
+    """Yorum düzenleme formu."""
+    class Meta:
+        model = TicketComment
+        fields = ['content']
+        widgets = {
+            'content': forms.Textarea(attrs={
+                'class': 'form-control',
+                'rows': 4,
+                'placeholder': 'Yanıtınızı düzenleyin...'
+            })
+        }
+

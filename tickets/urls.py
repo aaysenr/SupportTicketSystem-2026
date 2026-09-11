@@ -56,9 +56,11 @@ urlpatterns = [
     path('team-chat/create-group/', views.create_chat_group_view, name='create_chat_group'),
     path('team-chat/api/messages/<str:chat_type>/<int:chat_id>/', views.get_chat_messages_api, name='get_chat_messages_api'),
 
-    # Yorum Çözüm ve Beğeni İşlemleri
+    # Yorum Çözüm, Beğeni, Düzenleme ve Silme İşlemleri
     path('comment/<int:comment_id>/solution/', views.toggle_comment_solution, name='toggle_comment_solution'),
     path('comment/<int:comment_id>/like/', views.toggle_comment_like, name='toggle_comment_like'),
+    path('comment/<int:comment_id>/edit/', views.comment_edit, name='comment_edit'),
+    path('comment/<int:comment_id>/delete/', views.comment_delete, name='comment_delete'),
 
     # Bilgi Bankası (Knowledge Base / FAQ) ve Canlı Öneri API'si
     path('knowledge-base/', views.knowledge_base_list_view, name='knowledge_base'),

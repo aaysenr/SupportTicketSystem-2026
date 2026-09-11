@@ -65,9 +65,13 @@
                 <a href="{% url 'team_chat_detail' 'dm' mgr.id %}" 
                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2.5 {% if active_channel.type == 'dm' and active_channel.id == mgr.id %}active bg-primary border-primary{% endif %}">
                     <div class="d-flex align-items-center me-2">
-                        <div class="avatar-circle me-2 bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center fw-bold" style="width: 36px; height: 36px; font-size: 0.85rem;">
-                            {{ mgr.username|slice:":2"|upper }}
-                        </div>
+                        {% if mgr.profile.avatar_url %}
+                            <img src="{{ mgr.profile.avatar_url }}" alt="{{ mgr.username }}" class="rounded-circle me-2 border shadow-sm" style="width: 36px; height: 36px; object-fit: cover;">
+                        {% else %}
+                            <div class="avatar-circle me-2 bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center fw-bold" style="width: 36px; height: 36px; font-size: 0.85rem;">
+                                {{ mgr.username|slice:":2"|upper }}
+                            </div>
+                        {% endif %}
                         <div>
                             <div class="fw-bold small mb-0">{{ mgr.get_full_name|default:mgr.username }}</div>
                             <div class="small text-truncate {% if active_channel.type == 'dm' and active_channel.id == mgr.id %}text-white-50{% else %}text-muted{% endif %}" style="max-width: 140px; font-size: 0.75rem;">
@@ -103,7 +107,16 @@
             <!-- MESAJLAR ALANI -->
             <div class="card-body p-4 flex-grow-1 style-scroll" id="chatBox" style="height: 480px; overflow-y: auto; background-color: #f8fafc;">
                 {% for msg in chat_messages %}
-                <div class="d-flex mb-3 {% if msg.sender == user %}justify-content-end{% else %}justify-content-start{% endif %}" data-message-id="{{ msg.id }}">
+                <div class="d-flex mb-3 {% if msg.sender == user %}justify-content-end{% else %}justify-content-start align-items-end{% endif %}" data-message-id="{{ msg.id }}">
+                    {% if msg.sender != user %}
+                        {% if msg.sender.profile.avatar_url %}
+                            <img src="{{ msg.sender.profile.avatar_url }}" alt="{{ msg.sender.username }}" class="rounded-circle me-2 mb-1 border shadow-sm flex-shrink-0" style="width: 32px; height: 32px; object-fit: cover;">
+                        {% else %}
+                            <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center fw-bold me-2 mb-1 flex-shrink-0" style="width: 32px; height: 32px; font-size: 0.75rem;">
+                                {{ msg.sender.username|slice:":2"|upper }}
+                            </div>
+                        {% endif %}
+                    {% endif %}
                     <div class="message-bubble p-3 rounded-3 shadow-sm {% if msg.sender == user %}bg-primary text-white ms-5{% else %}bg-white text-dark me-5 border{% endif %}" style="max-width: 75%;">
                         {% if msg.sender != user %}
                         <div class="fw-bold small text-primary mb-1">{{ msg.sender.get_full_name|default:msg.sender.username }}</div>

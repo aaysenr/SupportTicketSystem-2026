@@ -319,6 +319,7 @@ class TicketComment(models.Model):
         verbose_name="Dosya / Görsel Eki"
     )
     is_solution = models.BooleanField(default=False, db_index=True, verbose_name="En İyi Yanıt / Çözüm")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Güncellenme Tarihi")
     likes = models.ManyToManyField(User, related_name='liked_comments', blank=True, verbose_name="Beğenen Kullanıcılar")
 
     @property
@@ -454,6 +455,13 @@ class UserProfile(models.Model):
     )
     is_2fa_enabled = models.BooleanField(default=False, verbose_name="2FA Aktif mi?")
     totp_secret = models.CharField(max_length=64, blank=True, null=True, verbose_name="2FA TOTP Gizli Anahtarı")
+    avatar = models.ImageField(
+        upload_to='avatars/%Y/%m/',
+        blank=True,
+        null=True,
+        verbose_name="Profil Fotoğrafı",
+        validators=[validate_file_security]
+    )
 
     class Meta:
         verbose_name = "Kullanıcı Profili ve Rolü"
@@ -481,6 +489,12 @@ class UserProfile(models.Model):
     @property
     def is_staff_agent(self):
         return self.is_superadmin or self.role in ['support_agent', 'finance_agent'] or self.user.is_staff
+
+    @property
+    def avatar_url(self):
+        if self.avatar and hasattr(self.avatar, 'url'):
+            return self.avatar.url
+        return None
 
     def can_access_category(self, category):
         """Bu yetkilinin ilgili kategoriye erişim izni olup olmadığını denetler."""
@@ -518,6 +532,13 @@ def delete_comment_attachment_on_delete(sender, instance, **kwargs):
     """Yorum silindiğinde sunucuda kalan fiziksel ek dosyasını diskten temizler"""
     if instance.attachment and instance.attachment.name:
         instance.attachment.delete(save=False)
+
+
+@receiver(post_delete, sender=UserProfile)
+def delete_avatar_on_delete(sender, instance, **kwargs):
+    """Kullanıcı profili silindiğinde fiziksel avatar dosyasını diskten temizler"""
+    if instance.avatar and instance.avatar.name:
+        instance.avatar.delete(save=False)
 
 
 

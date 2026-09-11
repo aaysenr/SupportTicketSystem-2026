@@ -748,8 +748,7 @@ def profile_view(request):
     Kullanıcı profil bilgilerini görüntüleme ve güncelleme ekranı.
     """
     if request.method == 'POST':
-
-        form = UserProfileForm(request.POST, instance=request.user, user=request.user)
+        form = UserProfileForm(request.POST, request.FILES, instance=request.user, user=request.user)
         if form.is_valid():
             form.save()
             messages.success(request, "Profil bilgileriniz başarıyla güncellendi.")
@@ -784,15 +783,17 @@ def change_password_view(request):
 
 
 
-def _async_email_worker(subject, message, recipient_list):
+def _async_email_worker(subject, message, recipient_list, html_message=None):
     try:
         from django.conf import settings
-        if not settings.DEBUG:
+        valid_recipients = [email for email in recipient_list if email]
+        if valid_recipients:
             send_mail(
                 subject=subject,
                 message=message,
-                from_email=None,
-                recipient_list=[email for email in recipient_list if email],
+                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
+                recipient_list=valid_recipients,
+                html_message=html_message,
                 fail_silently=False
             )
             logger.info("[E-POSTA] E-posta başarıyla gönderildi: Konu='%s'", subject)
@@ -800,18 +801,31 @@ def _async_email_worker(subject, message, recipient_list):
         logger.error("[E-POSTA] E-posta gönderiminde hata: %s", exc)
 
 
-def send_notification_email(subject, message, recipient_list):
+def send_notification_email(subject, message, recipient_list, ticket=None, action_url=None, html_message=None):
     """
-    Güvenli ve Asenkron (Non-blocking) E-posta Bildirim Gönderici.
-    Ana HTTP istek döngüsünü bloke etmeden arka planda e-posta gönderir.
+    Güvenli, Markalı (HTML) ve Asenkron (Non-blocking) E-posta Bildirim Gönderici.
+    Ana HTTP istek döngüsünü bloke etmeden arka planda zengin HTML e-posta gönderir.
     """
     if recipient_list and any(recipient_list):
+        if not html_message:
+            try:
+                from django.template.loader import render_to_string
+                html_message = render_to_string('emails/ticket_notification_email.html', {
+                    'subject': subject,
+                    'message': message,
+                    'ticket': ticket,
+                    'action_url': action_url,
+                })
+            except Exception as e:
+                logger.warning("[E-POSTA] HTML şablonu derlenemedi, düz metin ile devam ediliyor: %s", e)
+                html_message = None
+
         recipients = ", ".join([e for e in recipient_list if e])
         logger.info("[E-POSTA] Bildirim e-postası kuyruğa alındı: Alıcı(lar)=%s, Konu='%s'", recipients, subject)
 
         worker_thread = threading.Thread(
             target=_async_email_worker,
-            args=(subject, message, recipient_list),
+            args=(subject, message, recipient_list, html_message),
             daemon=True
         )
         worker_thread.start()
@@ -1152,6 +1166,86 @@ def toggle_comment_like(request, comment_id):
         })
 
     return redirect('ticket_detail', pk=ticket.id)
+
+
+@login_required
+@require_POST
+def comment_edit(request, comment_id):
+    """
+    Yorum sahibinin veya yetkililerin bir yorumu düzenlemesini sağlar.
+    Hem standart POST hem de AJAX JSON isteklerini destekler.
+    """
+    comment = get_object_or_404(TicketComment, id=comment_id)
+    is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '') or request.GET.get('ajax') == '1'
+    
+    # Yetki kontrolü: Yorum sahibi, süper yönetici veya yetkili personel
+    if request.user != comment.author and not request.user.is_staff and not request.user.is_superuser:
+        if is_ajax:
+            return JsonResponse({'status': 'error', 'message': 'Bu yorumu düzenleme yetkiniz yok.'}, status=403)
+        messages.error(request, "Bu yorumu düzenleme yetkiniz bulunmamaktadır.")
+        return redirect('ticket_detail', pk=comment.ticket.pk)
+
+    content = request.POST.get('content', '').strip()
+    if not content:
+        if is_ajax:
+            return JsonResponse({'status': 'error', 'message': 'Yorum metni boş bırakılamaz.'}, status=400)
+        messages.error(request, "Yorum metni boş bırakılamaz.")
+        return redirect('ticket_detail', pk=comment.ticket.pk)
+
+    comment.content = content
+    comment.save()
+
+    TicketActivityLog.objects.create(
+        ticket=comment.ticket,
+        actor=request.user,
+        action=f"#{comment.id} numaralı yorum düzenlendi."
+    )
+
+    if is_ajax:
+        return JsonResponse({
+            'status': 'ok',
+            'comment_id': comment.id,
+            'content': comment.content,
+            'message': 'Yorum başarıyla güncellendi.'
+        })
+
+    messages.success(request, "Yorumunuz başarıyla güncellendi.")
+    return redirect('ticket_detail', pk=comment.ticket.pk)
+
+
+@login_required
+@require_POST
+def comment_delete(request, comment_id):
+    """
+    Yorum sahibinin veya yetkililerin yorumu silmesini sağlar.
+    Ek dosyalar post_delete sinyaliyle diskten otomatik temizlenir.
+    """
+    comment = get_object_or_404(TicketComment, id=comment_id)
+    ticket_pk = comment.ticket.pk
+    is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '') or request.GET.get('ajax') == '1'
+
+    if request.user != comment.author and not request.user.is_staff and not request.user.is_superuser:
+        if is_ajax:
+            return JsonResponse({'status': 'error', 'message': 'Bu yorumu silme yetkiniz yok.'}, status=403)
+        messages.error(request, "Bu yorumu silme yetkiniz bulunmamaktadır.")
+        return redirect('ticket_detail', pk=ticket_pk)
+
+    TicketActivityLog.objects.create(
+        ticket=comment.ticket,
+        actor=request.user,
+        action=f"{comment.author.username} kullanıcısının bir yanıtı silindi."
+    )
+    comment.delete()
+
+    if is_ajax:
+        return JsonResponse({
+            'status': 'ok',
+            'comment_id': comment_id,
+            'message': 'Yorum başarıyla silindi.'
+        })
+
+    messages.success(request, "Yorum başarıyla silindi.")
+    return redirect('ticket_detail', pk=ticket_pk)
 
 
 # --- BİLGİ BANKASI (KNOWLEDGE BASE / FAQ) GÖRÜNÜMLERİ ---
