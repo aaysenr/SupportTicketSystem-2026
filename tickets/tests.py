@@ -810,6 +810,26 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertEqual(res_agent.status_code, 200)
         self.assertEqual(res_agent['Content-Type'], 'application/pdf')
 
+        # 5. Quill zengin metin içeren karmaşık HTML açıklamalı talep PDF üretimi
+        rich_ticket = Ticket.objects.create(
+            title='Zengin Metinli Talep <script> & test',
+            description='<p><strong>M<em>erhaba <u>nas\u0131ls\u0131n </u></em></strong></p><ol><li data-list="ordered"><span class="ql-ui" contenteditable="false"></span>evet</li><li data-list="bullet"><span class="ql-ui" contenteditable="false"></span>bilemeyiz</li></ol><blockquote>ne derler?</blockquote><div class="ql-code-block-container"><div class="ql-code-block">python manage.py runserver</div></div><p>evet</p>',
+            category=self.cat_tech,
+            created_by=self.normal_user,
+            is_public=False
+        )
+        TicketComment.objects.create(
+            ticket=rich_ticket,
+            author=self.tech_user,
+            content='<p>Yanıt: <b>Çözüldü</b> &amp; onaylandı!</p>',
+            is_solution=True
+        )
+        res_rich = self.client.get(reverse('export_ticket_pdf', kwargs={'pk': rich_ticket.pk}))
+        self.assertEqual(res_rich.status_code, 200)
+        rich_pdf_bytes = b"".join(res_rich.streaming_content)
+        self.assertTrue(len(rich_pdf_bytes) > 1000)
+        self.assertTrue(rich_pdf_bytes.startswith(b'%PDF'))
+
     def test_ai_suggest_meta_api(self):
         """AI Copilot canlı kategori ve öncelik öneri API'sini test et (4.4)."""
         api_url = reverse('ai_suggest_meta_api')
