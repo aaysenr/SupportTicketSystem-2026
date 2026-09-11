@@ -227,6 +227,18 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
 
+# ==============================================================================
+# Oturum Yönetimi ve Güvenliği (Session Management & Expiry)
+# ==============================================================================
+# Oturum çerezi süresi: 8 saat (28800 saniye). Kurumsal güvenlik gereği oturumların süresiz kalmasını sınırlar.
+SESSION_COOKIE_AGE = int(os.environ.get("SESSION_COOKIE_AGE", 28800))
+# Tarayıcı tamamen kapatıldığında oturumu otomatik sonlandır
+SESSION_EXPIRE_AT_BROWSER_CLOSE = os.environ.get("SESSION_EXPIRE_AT_BROWSER_CLOSE", "True").lower() in ("true", "1", "yes")
+# Kullanıcı her aktif işlem yaptığında oturum süresini kaydırarak yenile (Sliding session)
+SESSION_SAVE_EVERY_REQUEST = True
+# Oturum çerezini JavaScript erişimine kapat (XSS ile çerez hırsızlığını engeller)
+SESSION_COOKIE_HTTPONLY = True
+
 
 # ==============================================================================
 # Merkezi Loglama (Logging) Konfigürasyonu

@@ -131,7 +131,7 @@ class Ticket(models.Model):
     )
     created_by = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='tickets',
         verbose_name="Oluşturan Kullanıcı"
     )
@@ -444,7 +444,7 @@ class UserProfile(models.Model):
         return self.assigned_categories.filter(id=category.id).exists()
 
 
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
 @receiver(post_save, sender=User)
@@ -457,6 +457,21 @@ def create_or_update_user_profile(sender, instance, created, **kwargs):
     elif instance.is_staff and profile.role == 'user':
         profile.role = 'support_agent'
         profile.save()
+
+
+@receiver(post_delete, sender=Ticket)
+def delete_ticket_attachment_on_delete(sender, instance, **kwargs):
+    """Talep silindiğinde sunucuda kalan fiziksel ek dosyasını diskten temizler (Disk şişmesini engeller)"""
+    if instance.attachment and instance.attachment.name:
+        instance.attachment.delete(save=False)
+
+
+@receiver(post_delete, sender=TicketComment)
+def delete_comment_attachment_on_delete(sender, instance, **kwargs):
+    """Yorum silindiğinde sunucuda kalan fiziksel ek dosyasını diskten temizler"""
+    if instance.attachment and instance.attachment.name:
+        instance.attachment.delete(save=False)
+
 
 
 class KnowledgeBaseArticle(models.Model):

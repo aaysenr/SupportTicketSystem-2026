@@ -1777,11 +1777,12 @@ def inbound_email_webhook(request):
     E-posta başlığından / konusundan (#DES-XXXXX veya #ID) talep bulunur.
     Güvenlik: 'X-Webhook-Secret' başlığı veya ?token= parametresi ile doğrulanır.
     """
+    import hmac
     from django.conf import settings
     expected_secret = getattr(settings, 'INBOUND_EMAIL_WEBHOOK_SECRET', settings.SECRET_KEY[:32])
 
     provided_secret = request.headers.get('X-Webhook-Secret') or request.GET.get('token')
-    if not provided_secret or provided_secret != expected_secret:
+    if not provided_secret or not hmac.compare_digest(str(provided_secret), str(expected_secret)):
         return JsonResponse({'error': 'Geçersiz webhook gizli anahtarı (secret).'}, status=403)
 
     try:

@@ -891,6 +891,37 @@ class SecurityAndRBACWorkflowTests(TestCase):
         res_profile = self.client.get(reverse('profile'))
         self.assertEqual(res_profile.status_code, 302)
 
+    # 5. GÜVENLİK VE VERİ BÜTÜNLÜĞÜ İYİLEŞTİRMELERİ TESTLERİ (1.1 - 1.5)
+    def test_user_delete_protects_tickets(self):
+        """Kullanıcı silinmeye çalışıldığında biletlerin CASCADE ile yok olmasını önleyen PROTECT kuralını doğrula (1.1)."""
+        from django.db.models import ProtectedError
+        with self.assertRaises(ProtectedError):
+            self.normal_user.delete()
+
+    def test_ticket_post_delete_cleans_attachment(self):
+        """Talep veya yorum silindiğinde ekteki dosyanın diskten/depodan silindiğini doğrula (1.2)."""
+        from django.core.files.storage import default_storage
+        sample_file = SimpleUploadedFile("delete_test.png", b"fake_png_data", content_type="image/png")
+        temp_ticket = Ticket.objects.create(
+            title="Dosya Silme Testi",
+            description="Açıklama",
+            created_by=self.normal_user,
+            attachment=sample_file
+        )
+        file_name = temp_ticket.attachment.name
+        self.assertTrue(default_storage.exists(file_name))
+
+        # Talebi sil -> Sinyal dosyayı depodan temizlemeli
+        temp_ticket.delete()
+        self.assertFalse(default_storage.exists(file_name))
+
+    def test_session_security_settings(self):
+        """Oturum zaman aşımı ve HTTPOnly güvenlik başlıklarını doğrula (1.5)."""
+        self.assertEqual(getattr(settings, 'SESSION_COOKIE_AGE', None), 28800)
+        self.assertTrue(getattr(settings, 'SESSION_COOKIE_HTTPONLY', False))
+        self.assertTrue(getattr(settings, 'SESSION_EXPIRE_AT_BROWSER_CLOSE', False))
+
+
 
 
 
