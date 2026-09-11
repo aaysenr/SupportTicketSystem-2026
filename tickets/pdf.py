@@ -18,13 +18,19 @@ FONT_NAME = 'Helvetica'
 FONT_BOLD = 'Helvetica-Bold'
 
 try:
-    font_regular = "C:/Windows/Fonts/arial.ttf"
-    font_bold = "C:/Windows/Fonts/arialbd.ttf"
-    if os.path.exists(font_regular) and os.path.exists(font_bold):
-        pdfmetrics.registerFont(TTFont('AppArial', font_regular))
-        pdfmetrics.registerFont(TTFont('AppArialBold', font_bold))
-        FONT_NAME = 'AppArial'
-        FONT_BOLD = 'AppArialBold'
+    candidate_fonts = [
+        ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/freefont/FreeSans.ttf", "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
+    ]
+    for reg, bld in candidate_fonts:
+        if os.path.exists(reg) and os.path.exists(bld):
+            pdfmetrics.registerFont(TTFont('AppFont', reg))
+            pdfmetrics.registerFont(TTFont('AppFontBold', bld))
+            FONT_NAME = 'AppFont'
+            FONT_BOLD = 'AppFontBold'
+            break
 except Exception:
     pass
 

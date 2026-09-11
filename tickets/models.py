@@ -586,13 +586,6 @@ def delete_avatar_on_delete(sender, instance, **kwargs):
 
 class KnowledgeBaseArticle(models.Model):
     """Sıkça sorulan sorular (SSS) ve bilgi bankası makalelerini tutan model."""
-    CATEGORY_CHOICES = (
-        ('general', 'Genel Bilgiler'),
-        ('account', 'Hesap & Güvenlik'),
-        ('billing', 'Faturalandırma & Ödeme'),
-        ('technical', 'Teknik Sorunlar & Hatalar'),
-    )
-
     title = models.CharField(max_length=200, verbose_name="Makale Başlığı")
     category = models.ForeignKey(
         Category,
