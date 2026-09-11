@@ -19,6 +19,10 @@ urlpatterns = [
     path('login/', views.login_user, name='login'),
     path('logout/', views.logout_user, name='logout'),
     path('verify-email/', views.verify_email, name='verify_email'),
+    # İki Aşamalı Doğrulama (2FA - TOTP)
+    path('2fa/setup/', views.setup_2fa_view, name='setup_2fa'),
+    path('2fa/disable/', views.disable_2fa_view, name='disable_2fa'),
+    path('2fa/verify/', views.verify_2fa_view, name='verify_2fa'),
 
     # Şifre Sıfırlama (Password Reset) Akışı
     path('password-reset/', auth_views.PasswordResetView.as_view(
@@ -60,6 +64,10 @@ urlpatterns = [
     path('knowledge-base/', views.knowledge_base_list_view, name='knowledge_base'),
     path('knowledge-base/<int:pk>/', views.knowledge_base_detail_view, name='knowledge_base_detail'),
     path('api/kb/suggest/', views.kb_suggest_api, name='kb_suggest_api'),
+
+    # Hazır Yanıt Şablonları (Canned Responses) ve E-Posta Webhook API'si
+    path('api/canned-responses/', views.canned_responses_api, name='canned_responses_api'),
+    path('api/inbound-email/', views.inbound_email_webhook, name='inbound_email_webhook'),
 
     # Müşteri Memnuniyet Anketi (CSAT) Değerlendirme API'si
     path('ticket/<int:ticket_id>/rate/', views.submit_ticket_rating_api, name='ticket_rate_api'),

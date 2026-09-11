@@ -26,6 +26,9 @@
                 <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
                     <i class="bi bi-pencil me-1"></i> Talebi Düzenle
                 </a>
+                <a href="{% url 'ticket_delete' ticket.id %}" class="btn btn-outline-danger btn-sm rounded-pill px-3">
+                    <i class="bi bi-trash3 me-1"></i> Talebi Sil
+                </a>
             {% else %}
                 <span class="d-inline-block" tabindex="0" data-bs-toggle="tooltip" title="Çözülen veya kapatılan talepler düzenlenemez.">
                     <button class="btn btn-outline-secondary btn-sm rounded-pill px-3" disabled>
@@ -366,6 +369,13 @@
     </div>
 
     <div class="card-body p-4">
+        <!-- CANLI YAZIYOR... GÖSTERGESİ (LIVE TYPING INDICATOR) -->
+        <div id="liveTypingIndicator" class="alert alert-info py-2 px-3 rounded-pill d-none align-items-center gap-2 mb-3" style="width: fit-content;">
+            <span class="spinner-grow spinner-grow-sm text-primary" role="status"></span>
+            <small class="fw-semibold" id="liveTypingText">Yetkili şu anda yanıt yazıyor...</small>
+        </div>
+
+        <div id="commentsContainer">
         {% for comment in comments %}
         <div id="comment-item-{{ comment.id }}" class="comment-card mb-4 {% if comment.is_solution %}p-3 rounded-3 border border-2 border-success bg-success-subtle shadow-sm{% elif comment.is_internal %}bg-warning-subtle p-3 rounded-3 border border-warning{% else %}p-3 rounded-3 border bg-body{% endif %} transition-all">
             
@@ -409,7 +419,7 @@
                             <span class="small fw-semibold text-body">
                                 <i class="bi bi-image text-primary me-1"></i>{{ comment.attachment_filename }}
                             </span>
-                            <a href="{{ comment.attachment.url }}" target="_blank" download class="btn btn-sm btn-outline-primary rounded-pill px-3">
+                            <a href="{% url 'comment_attachment_download' comment.id %}?download=1" download class="btn btn-sm btn-outline-primary rounded-pill px-3">
                                 <i class="bi bi-download me-1"></i>İndir
                             </a>
                         </div>
@@ -488,12 +498,13 @@
         </div>
         {% empty %}
 
-        <div class="text-center py-5 text-muted">
+        <div id="noCommentsPlaceholder" class="text-center py-5 text-muted">
             <i class="bi bi-chat-square-dots display-4 d-block mb-3 text-secondary-emphasis opacity-50"></i>
             <h6 class="fw-semibold text-body">Henüz hiç yanıt yapılmamış</h6>
             <p class="small text-muted mb-0">İlk yanıtı veya bilgilendirmeyi aşağıdaki formu kullanarak ekleyebilirsiniz.</p>
         </div>
         {% endfor %}
+        </div>
     </div>
 </div>
 
@@ -515,6 +526,29 @@
 
         <form method="POST" enctype="multipart/form-data">
             {% csrf_token %}
+
+            <!-- HAZIR YANIT ŞABLONLARI (CANNED RESPONSES) PANELİ -->
+            {% if request.user.is_staff and canned_responses %}
+            <div class="mb-3 p-3 bg-body-tertiary rounded-3 border">
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                    <label for="cannedResponseSelect" class="form-label mb-0 fw-bold small text-body">
+                        <i class="bi bi-chat-quote-fill text-primary me-1"></i>Hazır Yanıt Şablonu:
+                    </label>
+                    <div class="d-flex align-items-center gap-2">
+                        <select id="cannedResponseSelect" class="form-select form-select-sm" style="min-width: 240px;">
+                            <option value="">-- Bir Şablon Seçiniz --</option>
+                            {% for cr in canned_responses %}
+                            <option value="{{ cr.id }}" data-content="{{ cr.content }}">{{ cr.title }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="button" id="insertCannedBtn" class="btn btn-sm btn-outline-primary text-nowrap rounded-pill">
+                            <i class="bi bi-arrow-down-left-square me-1"></i>Metne Ekle
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
             <div class="mb-3">
                 <label for="{{ comment_form.content.id_for_label }}" class="form-label fw-bold text-body">
                     {{ comment_form.content.label }}
@@ -580,8 +614,9 @@ document.addEventListener('DOMContentLoaded', function () {
             btn.disabled = true;
 
             fetch(url, {
-                method: 'GET',
+                method: 'POST',
                 headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
                     'X-Requested-With': 'XMLHttpRequest',
                     'Accept': 'application/json'
                 }
@@ -625,8 +660,9 @@ document.addEventListener('DOMContentLoaded', function () {
             btn.disabled = true;
 
             fetch(url, {
-                method: 'GET',
+                method: 'POST',
                 headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
                     'X-Requested-With': 'XMLHttpRequest',
                     'Accept': 'application/json'
                 }
@@ -796,6 +832,154 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     };
+
+    // 3. Hazır Yanıt Şablonu (Canned Response) Yapıştırma
+    const cannedSelect = document.getElementById('cannedResponseSelect');
+    const insertCannedBtn = document.getElementById('insertCannedBtn');
+    const contentTextarea = document.querySelector('textarea[name="content"]') || document.getElementById('id_content');
+
+    if (insertCannedBtn && cannedSelect && contentTextarea) {
+        insertCannedBtn.addEventListener('click', function () {
+            const selectedOpt = cannedSelect.options[cannedSelect.selectedIndex];
+            if (selectedOpt && selectedOpt.value) {
+                const text = selectedOpt.getAttribute('data-content') || '';
+                if (contentTextarea.value.trim().length > 0) {
+                    contentTextarea.value += '\n\n' + text;
+                } else {
+                    contentTextarea.value = text;
+                }
+                contentTextarea.focus();
+            }
+        });
+    }
+
+    // 4. Canlı Talep İçi Mesajlaşma & Yazıyor... (Live Ticket WebSocket)
+    const ticketId = {{ ticket.id }};
+    const currentUserId = {{ request.user.id }};
+    const isStaffUser = {% if request.user.is_staff %}true{% else %}false{% endif %};
+    const wsScheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ticketWsUrl = `${wsScheme}${window.location.host}/ws/ticket/${ticketId}/`;
+    let ticketSocket = null;
+    let typingTimer = null;
+
+    try {
+        ticketSocket = new WebSocket(ticketWsUrl);
+
+        ticketSocket.onmessage = function (e) {
+            try {
+                const data = JSON.parse(e.data);
+                if (data.type === 'typing') {
+                    const indicator = document.getElementById('liveTypingIndicator');
+                    const typingText = document.getElementById('liveTypingText');
+                    if (indicator && typingText) {
+                        if (data.is_typing) {
+                            const sender = data.sender_name || 'Biri';
+                            typingText.textContent = `${sender} şu anda yazıyor...`;
+                            indicator.classList.remove('d-none');
+                            indicator.classList.add('d-flex');
+                        } else {
+                            indicator.classList.add('d-none');
+                            indicator.classList.remove('d-flex');
+                        }
+                    }
+                } else if (data.type === 'comment') {
+                    // Sayfada bu yorum zaten var mı kontrol et
+                    const existingCard = document.getElementById(`comment-item-${data.comment_id}`);
+                    if (existingCard) return;
+
+                    // Henüz hiç yanıt yoksa placeholder'ı kaldır
+                    const noPlaceholder = document.getElementById('noCommentsPlaceholder');
+                    if (noPlaceholder) noPlaceholder.remove();
+
+                    // Yeni yorum kartını dinamik inşa et
+                    const card = document.createElement('div');
+                    card.id = `comment-item-${data.comment_id}`;
+                    card.className = `comment-card mb-4 p-3 rounded-3 border bg-body transition-all ${data.is_internal ? 'bg-warning-subtle border-warning' : ''}`;
+
+                    let badgesHtml = '';
+                    if (data.is_staff) {
+                        badgesHtml += '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle rounded-pill small">Yetkili</span>';
+                    }
+                    if (data.is_internal) {
+                        badgesHtml += '<span class="badge bg-warning text-dark rounded-pill ms-1"><i class="bi bi-lock-fill me-1"></i>Gizli İç Not</span>';
+                    }
+
+                    let attachmentHtml = '';
+                    if (data.attachment_url) {
+                        attachmentHtml = `
+                            <div class="mt-2 p-2 bg-body-tertiary rounded border small">
+                                <a href="${data.attachment_url}" target="_blank" class="text-decoration-none fw-semibold">
+                                    <i class="bi bi-paperclip me-1 text-primary"></i>${data.attachment_name || 'Dosya Eki'}
+                                </a>
+                            </div>
+                        `;
+                    }
+
+                    card.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <strong class="text-body">
+                                    <i class="bi bi-person-circle me-1 text-primary"></i>${data.author_name}
+                                </strong>
+                                ${badgesHtml}
+                            </div>
+                            <small class="text-body-secondary"><i class="bi bi-clock me-1"></i>${data.created_at}</small>
+                        </div>
+                        <div class="comment-content text-body mb-2" style="font-size: 0.95rem; line-height: 1.6;">
+                            ${data.content}
+                        </div>
+                        ${attachmentHtml}
+                    `;
+
+                    const container = document.getElementById('commentsContainer');
+                    if (container) {
+                        container.appendChild(card);
+                        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+
+                    // Yorum sayacını güncelle
+                    const countEl = document.getElementById('total-comments-count');
+                    if (countEl) {
+                        const current = parseInt(countEl.textContent, 10);
+                        if (!isNaN(current)) countEl.textContent = current + 1;
+                    }
+
+                    // Yazıyor göstergesini gizle
+                    const indicator = document.getElementById('liveTypingIndicator');
+                    if (indicator) {
+                        indicator.classList.add('d-none');
+                        indicator.classList.remove('d-flex');
+                    }
+                }
+            } catch (err) {
+                console.error('Ticket WS mesajı okunamadı:', err);
+            }
+        };
+
+        // Yazarken WebSocket üzerinden typing sinyali ilet
+        if (contentTextarea) {
+            contentTextarea.addEventListener('input', function () {
+                if (ticketSocket && ticketSocket.readyState === WebSocket.OPEN) {
+                    ticketSocket.send(JSON.stringify({
+                        type: 'typing',
+                        is_typing: true
+                    }));
+
+                    clearTimeout(typingTimer);
+                    typingTimer = setTimeout(function () {
+                        if (ticketSocket && ticketSocket.readyState === WebSocket.OPEN) {
+                            ticketSocket.send(JSON.stringify({
+                                type: 'typing',
+                                is_typing: false
+                            }));
+                        }
+                    }, 2500);
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('Talep WebSocket başlatılamadı:', e);
+    }
 });
 </script>
 {% endblock %}

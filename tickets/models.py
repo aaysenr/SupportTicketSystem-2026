@@ -10,17 +10,25 @@ from .validators import validate_file_security
 # from django.contrib.auth.models import User: Django'nun hazır kullanıcı yönetimi modelini projeye aktarır.
 
 
+import secrets
+
 class EmailVerification(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='email_verification')
     code = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+
     def generate_code(self):
-        """6 haneli rastgele kod üretir"""
-        self.code = str(random.randint(100000, 999999))
+        """Kriptografik olarak güvenli 6 haneli rastgele kod üretir"""
+        self.code = ''.join(secrets.choice('0123456789') for _ in range(6))
         self.created_at = timezone.now()
+        self.failed_attempts = 0
         self.save()
+
     def is_valid(self):
-        """Kodun 10 dakika boyunca geçerli olmasını sağlar"""
+        """Kodun 10 dakika boyunca geçerli ve en fazla 5 hatalı deneme ile sınırlı olmasını sağlar"""
+        if self.failed_attempts >= 5:
+            return False
         now = timezone.now()
         diff = now - self.created_at
         return diff.total_seconds() < 600 # 600 saniye = 10 dakika
@@ -221,8 +229,16 @@ class Ticket(models.Model):
         help_text="Destek yetkilisi tarafından ilk yanıtın verildiği zaman."
     )
 
+    sla_deadline = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="SLA Son Tarihi",
+        help_text="SLA hedef teslim / ilk yanıt tarihi."
+    )
+
     # Tarih Bilgileri
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Oluşturulma Tarihi")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="Oluşturulma Tarihi")
     #Bu alan, talebin ilk kaydedildiği anı (saniye hassasiyetinde) otomatik olarak kaydeder.
     #Talebin ilk oluşturulduğu tarih ve saati otomatik kaydeder.
 
@@ -241,6 +257,17 @@ class Ticket(models.Model):
     def __str__(self):
         return f"#{self.id} - {self.title}"
         #Talep nesnesi gösterilirken " #1 - Ekran Kırıldı"  şeklinde ID ve başlık kombinasyonu döndürür.
+
+    def save(self, *args, **kwargs):
+        # SLA hedef süresini oluşturulma anında veya öncelik/tarih değişiminde bir kez hesapla
+        base_time = self.created_at or timezone.now()
+        if not self.sla_deadline:
+            self.sla_deadline = add_business_hours(base_time, self.sla_target_hours)
+        elif self.created_at:
+            expected_deadline = add_business_hours(self.created_at, self.sla_target_hours)
+            if self.sla_deadline != expected_deadline:
+                self.sla_deadline = expected_deadline
+        super().save(*args, **kwargs)
 
     @property
     def ticket_number(self):
@@ -266,23 +293,15 @@ class Ticket(models.Model):
         return targets.get(self.priority, 24)
 
     @property
-    def sla_deadline(self):
-        """SLA son yanıt tarihi (Hafta içi 09:00 - 18:00 mesai saatlerine duyarlı)."""
-        if self.created_at:
-            return add_business_hours(self.created_at, self.sla_target_hours)
-        return None
-
-    @property
     def is_sla_breached(self):
         """İlk yanıt süresi SLA hedefinin aşıldığını belirler."""
-        deadline = self.sla_deadline
-        if not deadline:
+        if not self.sla_deadline:
             return False
         if self.first_response_at:
-            return self.first_response_at > deadline
+            return self.first_response_at > self.sla_deadline
         if self.status in ['resolved', 'closed']:
             return False
-        return timezone.now() > deadline
+        return timezone.now() > self.sla_deadline
 
     @property
     def sla_remaining_text(self):
@@ -412,13 +431,16 @@ class Notification(models.Model):
     actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Bildirimi Tetikleyen")
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True, verbose_name="İlişkili Talep")
     message = models.CharField(max_length=255, verbose_name="Bildirim Mesajı")
-    is_read = models.BooleanField(default=False, verbose_name="Okundu Mu?")
+    is_read = models.BooleanField(default=False, db_index=True, verbose_name="Okundu Mu?")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Tarih")
 
     class Meta:
         verbose_name = "Bildirim"
         verbose_name_plural = "Bildirimler"
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['recipient', 'is_read']),
+        ]
 
     def __str__(self):
         return f"{self.recipient.username} - {self.message}"
@@ -453,7 +475,7 @@ class ChatMessage(models.Model):
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='received_chat_messages', verbose_name="Alıcı (Özel Mesaj)")
     content = models.TextField(verbose_name="Mesaj İçeriği")
     is_read = models.BooleanField(default=False, verbose_name="Okundu mu?")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Tarih")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="Tarih")
 
     class Meta:
         verbose_name = "Sohbet Mesajı"
@@ -485,6 +507,8 @@ class UserProfile(models.Model):
         verbose_name="Sorumlu Olduğu Kategoriler",
         help_text="Teknik Destek veya Finans yetkilileri için sorumlu oldukları departman/kategorileri seçiniz."
     )
+    is_2fa_enabled = models.BooleanField(default=False, verbose_name="2FA Aktif mi?")
+    totp_secret = models.CharField(max_length=64, blank=True, null=True, verbose_name="2FA TOTP Gizli Anahtarı")
 
     class Meta:
         verbose_name = "Kullanıcı Profili ve Rolü"
@@ -547,7 +571,14 @@ class KnowledgeBaseArticle(models.Model):
     )
 
     title = models.CharField(max_length=200, verbose_name="Makale Başlığı")
-    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='general', verbose_name="Kategori")
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kb_articles',
+        verbose_name="Kategori"
+    )
     content = models.TextField(verbose_name="Makale İçeriği")
     keywords = models.CharField(max_length=255, blank=True, verbose_name="Anahtar Kelimeler", help_text="Arama eşleştirmesi için anahtar kelimeler (virgülle ayırın)")
     views_count = models.PositiveIntegerField(default=0, verbose_name="Görüntülenme Sayısı")
@@ -587,3 +618,34 @@ class TicketRating(models.Model):
 
     def __str__(self):
         return f"#{self.ticket.id} Değerlendirmesi: {self.score}/5"
+
+
+class CannedResponse(models.Model):
+    """Destek ekibinin sık kullandığı hazır yanıt şablonları."""
+    title = models.CharField(max_length=150, verbose_name="Şablon Başlığı")
+    content = models.TextField(verbose_name="Yanıt Metni")
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='canned_responses',
+        verbose_name="Kategori",
+        help_text="Belirli bir kategoriye özel şablon için seçin veya tüm taleplerde geçerli olması için boş bırakın."
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='canned_responses',
+        verbose_name="Oluşturan"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Oluşturulma Tarihi")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Güncellenme Tarihi")
+
+    class Meta:
+        verbose_name = "Hazır Yanıt Şablonu"
+        verbose_name_plural = "Hazır Yanıt Şablonları"
+        ordering = ['title']
+
+    def __str__(self):
+        return self.title

@@ -41,8 +41,67 @@
                         <i class="bi bi-key me-1"></i> Şifre Değiştir
                     </a>
                 </div>
+
+                <hr class="my-4">
+
+                <!-- İKİ AŞAMALI DOĞRULAMA (2FA - TOTP) BÖLÜMÜ -->
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <div class="d-flex align-items-center gap-2">
+                            <h6 class="mb-0 fw-bold">İki Aşamalı Doğrulama (2FA)</h6>
+                            {% if user.profile.is_2fa_enabled %}
+                                <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-shield-check me-1"></i>Aktif</span>
+                            {% else %}
+                                <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Devre Dışı</span>
+                            {% endif %}
+                        </div>
+                        <small class="text-muted">Google Authenticator veya Authy ile giriş güvenliği.</small>
+                    </div>
+                    <div>
+                        {% if user.profile.is_2fa_enabled %}
+                            <button type="button" class="btn btn-outline-danger btn-sm fw-bold" data-bs-toggle="modal" data-bs-target="#disable2FAModal">
+                                <i class="bi bi-shield-x me-1"></i>2FA Kapat
+                            </button>
+                        {% else %}
+                            <a href="{% url 'setup_2fa' %}" class="btn btn-outline-primary btn-sm fw-bold">
+                                <i class="bi bi-shield-plus me-1"></i>2FA Etkinleştir
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
 </div>
+
+<!-- 2FA DEVRE DIŞI BIRAKMA ONAY MODALI -->
+{% if user.profile.is_2fa_enabled %}
+<div class="modal fade" id="disable2FAModal" tabindex="-1" aria-labelledby="disable2FAModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header border-0">
+                <h5 class="modal-title fw-bold text-danger" id="disable2FAModalLabel"><i class="bi bi-shield-exclamation me-2"></i>2FA Kapatma Onayı</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <form method="POST" action="{% url 'disable_2fa' %}">
+                {% csrf_token %}
+                <div class="modal-body py-3">
+                    <p class="small text-muted mb-3">
+                        İki aşamalı doğrulamayı devre dışı bırakmak hesabınızın güvenliğini azaltabilir. İşlemi onaylamak için lütfen mevcut hesap şifrenizi giriniz:
+                    </p>
+                    <div class="mb-3">
+                        <label for="disable_password" class="form-label small fw-bold text-dark">Hesap Şifreniz</label>
+                        <input type="password" name="password" id="disable_password" class="form-control" required autocomplete="current-password">
+                    </div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-danger btn-sm fw-bold px-3">2FA'yı Kapat</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}

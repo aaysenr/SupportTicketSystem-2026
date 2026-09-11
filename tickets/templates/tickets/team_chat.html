@@ -123,6 +123,12 @@
 
             <!-- MESAJ YAZMA ALANI -->
             <div class="card-footer bg-white p-3 border-top">
+                <!-- KULLANICI YAZIYOR GÖSTERGESİ -->
+                <div id="teamChatTyping" class="text-muted small px-1 py-1 mb-2 d-none align-items-center gap-2" style="min-height: 22px;">
+                    <span class="spinner-grow spinner-grow-sm text-primary" role="status" style="width: 10px; height: 10px;"></span>
+                    <span id="teamChatTypingText" class="fst-italic"></span>
+                </div>
+
                 <form id="chatForm">
                     {% csrf_token %}
                     <input type="hidden" name="chat_type" value="{{ active_channel.type }}">
@@ -246,13 +252,30 @@
             div.className = `d-flex mb-3 ${isMe ? 'justify-content-end' : 'justify-content-start'}`;
             if (msg.message_id) div.setAttribute('data-message-id', msg.message_id);
 
-            div.innerHTML = `
-                <div class="message-bubble p-3 rounded-3 shadow-sm ${isMe ? 'bg-primary text-white ms-5' : 'bg-white text-dark me-5 border'}" style="max-width: 75%;">
-                    ${!isMe ? `<div class="fw-bold small text-primary mb-1">${msg.sender_name}</div>` : ''}
-                    <div class="message-content text-break">${msg.content}</div>
-                    <div class="text-end mt-1" style="font-size: 0.7rem; opacity: 0.8;">${msg.created_at}</div>
-                </div>
-            `;
+            const bubble = document.createElement('div');
+            bubble.className = `message-bubble p-3 rounded-3 shadow-sm ${isMe ? 'bg-primary text-white ms-5' : 'bg-white text-dark me-5 border'}`;
+            bubble.style.maxWidth = '75%';
+
+            if (!isMe) {
+                const senderDiv = document.createElement('div');
+                senderDiv.className = 'fw-bold small text-primary mb-1';
+                senderDiv.textContent = msg.sender_name || '';
+                bubble.appendChild(senderDiv);
+            }
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content text-break';
+            contentDiv.textContent = msg.content || '';
+            bubble.appendChild(contentDiv);
+
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'text-end mt-1';
+            timeDiv.style.fontSize = '0.7rem';
+            timeDiv.style.opacity = '0.8';
+            timeDiv.textContent = msg.created_at || '';
+            bubble.appendChild(timeDiv);
+
+            div.appendChild(bubble);
             chatBox.appendChild(div);
             scrollToBottom();
         }
@@ -277,7 +300,25 @@
                 socket.onmessage = function (e) {
                     try {
                         const data = JSON.parse(e.data);
-                        if (data.status === 'success') {
+                        if (data.type === 'typing' || data.status === 'typing') {
+                            const typingBox = document.getElementById('teamChatTyping');
+                            const typingText = document.getElementById('teamChatTypingText');
+                            if (typingBox && typingText) {
+                                if (data.is_typing) {
+                                    typingText.textContent = `${data.sender_name || 'Yetkili'} yazıyor...`;
+                                    typingBox.classList.remove('d-none');
+                                    typingBox.classList.add('d-flex');
+                                } else {
+                                    typingBox.classList.add('d-none');
+                                    typingBox.classList.remove('d-flex');
+                                }
+                            }
+                        } else if (data.status === 'success') {
+                            const typingBox = document.getElementById('teamChatTyping');
+                            if (typingBox) {
+                                typingBox.classList.add('d-none');
+                                typingBox.classList.remove('d-flex');
+                            }
                             appendMessage(data);
                         }
                     } catch (err) {
@@ -355,6 +396,27 @@
                     }
                 })
                 .catch(err => console.error('Mesaj gönderilemedi:', err));
+            }
+        });
+
+        // 4. Kullanıcı Yazıyor... Sinyali Gönderimi
+        let teamTypingTimer = null;
+        messageInput.addEventListener('input', function () {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'typing',
+                    is_typing: true
+                }));
+
+                clearTimeout(teamTypingTimer);
+                teamTypingTimer = setTimeout(function () {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            type: 'typing',
+                            is_typing: false
+                        }));
+                    }
+                }, 2500);
             }
         });
 

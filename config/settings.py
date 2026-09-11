@@ -12,21 +12,32 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 import dj_database_url
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# .env dosyasını yükle (Varsa ortam değişkenlerini yükler)
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-qat@c!_c=*g)d7*zp&ln=+3=$am*e=kt&q1zjqfw=z1og$#w*8"
+SECRET_KEY = os.environ.get(
+    "SECRET_KEY",
+    "django-insecure-qat@c!_c=*g)d7*zp&ln=+3=$am*e=kt&q1zjqfw=z1og$#w*8"
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
 
-ALLOWED_HOSTS = []
+_allowed_hosts = os.environ.get("ALLOWED_HOSTS", "")
+if _allowed_hosts:
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts.split(",") if h.strip()]
+else:
+    ALLOWED_HOSTS = ["*"] if DEBUG else []
 
 
 # Application definition
@@ -157,29 +168,19 @@ STATIC_URL = "static/"
 
 
 # Email Konfigürasyonu (12-Factor: Canlıda SMTP, Geliştirmede Console)
-# https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-# Ortam değişkenlerinde EMAIL_HOST tanımlıysa gerçek SMTP servisi devreye girer.
-# Tanımlı değilse e-postalar konsola yazdırılır (Local development / test güvenliği).
+# https://docs.djangoproject.com/en/stable/topics/email/#topic-email-configuration
 _email_host = os.environ.get('EMAIL_HOST', '')
 if _email_host:
-    MAILERS = {
-        "default": {
-            "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
-            "HOST": _email_host,
-            "PORT": int(os.environ.get('EMAIL_PORT', 587)),
-            "USE_TLS": os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes'),
-            "USE_SSL": os.environ.get('EMAIL_USE_SSL', 'False').lower() in ('true', '1', 'yes'),
-            "USERNAME": os.environ.get('EMAIL_HOST_USER', ''),
-            "PASSWORD": os.environ.get('EMAIL_HOST_PASSWORD', ''),
-        }
-    }
-    DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', os.environ.get('EMAIL_HOST_USER', '') or 'noreply@desteksistemi.com')
+    EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
+    EMAIL_HOST = _email_host
+    EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+    EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes')
+    EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'False').lower() in ('true', '1', 'yes')
+    EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+    EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+    DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'noreply@desteksistemi.com')
 else:
-    MAILERS = {
-        "default": {
-            "BACKEND": "django.core.mail.backends.console.EmailBackend",
-        }
-    }
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
     DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@desteksistemi.com')
 
 

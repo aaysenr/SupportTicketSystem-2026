@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating
+from .models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, CannedResponse
 
 #from django.contrib import admin: Django'nun yönetim paneli araçlarını projeye dahil eder.
 #from .models import ...: Aynı klasördeki (.) models.py dosyasından hazırladığımız 3 modeli içe aktarır.
@@ -114,4 +114,11 @@ class TicketRatingAdmin(admin.ModelAdmin):
     list_display = ('ticket', 'user', 'score', 'created_at')
     list_filter = ('score', 'created_at')
     search_fields = ('ticket__title', 'user__username', 'feedback')
+
+
+@admin.register(CannedResponse)
+class CannedResponseAdmin(admin.ModelAdmin):
+    list_display = ('title', 'category', 'created_by', 'created_at')
+    list_filter = ('category', 'created_at')
+    search_fields = ('title', 'content')
 

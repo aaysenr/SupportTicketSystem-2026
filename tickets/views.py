@@ -1,35 +1,33 @@
-from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse, FileResponse, HttpResponseForbidden, Http404
 import os
 import mimetypes
-from .models import Ticket
-from .forms import TicketForm,CommentForm, UserRegisterForm # CommentForm sınıfını detay görünümünde kullanabilmek için içeri aktarır.
+import json
+import re
+import threading
+import nh3
+from django.shortcuts import render, get_object_or_404, redirect
+from django.http import JsonResponse, FileResponse, HttpResponseForbidden, Http404
 from django.contrib.auth.models import User
-from django.db.models import Q, Count, Avg  # Karmaşık arama sorguları, sayım ve ortalama için nesneleri içeri aktarıyoruz
-from django.core.paginator import Paginator  # Sayfalama (Pagination) için Paginator sınıfı
-from django.core.mail import send_mail
-from .models import EmailVerification
 from django.contrib.auth import login, logout, authenticate, update_session_auth_hash 
-from django.contrib.auth.forms import UserCreationForm, AuthenticationForm, PasswordChangeForm #
-from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm 
-from .models import Ticket, TicketComment, Category, EmailVerification, TicketActivityLog, Notification, ChatGroup, ChatMessage, UserProfile, KnowledgeBaseArticle, TicketRating
-
-# render: Django'nun HTML şablonlarını (template) verilerle birleştirip kullanıcıya sunmasını sağlayan pratik bir yardımcı fonksiyondur.
-# from .models import Ticket: Bulunduğumuz uygulama klasöründeki (.) models.py dosyasından veritabanı tablomuzu temsil eden Ticket modelini projeye dahil eder.
-#get_object_or_404: Veritabanından nesne çekerken hata yönetimini (Exception Handling) otomatik yapan kısayoldur.
-
-# redirect: Kullanıcıyı bir işlem bittikten sonra başka bir URL'e yönlendiren fonksiyondur. Sayfanın yenilenmesiyle formun mükerrer (çift) gönderilmesini engeller.
-
-# from .forms import TicketForm: TicketForm sınıfını kullanabilmek için içeri alır.
-
-# from django.contrib.auth.models import User: Oturum açmamış test durumlarında kullanıcı atayabilmek için Django'nun kullanıcı modelini içeri aktarır.
-
-
-# Oturum Yönetimi ve Güvenlik İçin Gerekli İçe Aktarmalar
-from django.contrib.auth import login, logout, authenticate
-from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
+from django.db.models import Q, Count, Avg, F
+from django.core.paginator import Paginator
+from django.core.mail import send_mail
+from django.utils import timezone
+
+from .models import (
+    Ticket, TicketComment, Category, EmailVerification, TicketActivityLog,
+    Notification, ChatGroup, ChatMessage, UserProfile, KnowledgeBaseArticle,
+    TicketRating, CannedResponse
+)
+from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm
+from .totp import (
+    generate_totp_secret, get_totp_token, verify_totp_token,
+    get_totp_uri, generate_qr_code_data_uri
+)
 
 """
 login, logout, authenticate:
@@ -46,11 +44,6 @@ UserCreationForm, AuthenticationForm: Django'nun şifre kurallarını (en az 8 k
 
 messages: İşlem tamamlandığında (Örn: "Hesap oluşturuldu", "Yorum eklendi") ekrana bir kerelik Bootstrap alert kutusu basmamızı sağlayan mesaj çerçevesidir.
 """
-
-import json
-from django.db.models import Count
-from django.utils import timezone
-from .models import Category
 
 @login_required
 def admin_dashboard_view(request):
@@ -79,42 +72,64 @@ def admin_dashboard_view(request):
         base_qs = Ticket.objects.all()
         categories = Category.objects.annotate(ticket_count=Count('tickets'))
 
-    # 1. Temel Metrikler (Yetkili Kapsama Göre)
-    total_tickets = base_qs.count()
-    open_tickets = base_qs.filter(status='open').count()
-    in_progress_tickets = base_qs.filter(status='in_progress').count()
-    resolved_tickets = base_qs.filter(status='resolved').count()
-    urgent_tickets = base_qs.filter(priority='urgent').count()
-
-    # 2. SLA Yanıt Süresi Analizi (Geciken / Kritik Talepler)
-    all_tickets_list = list(base_qs.select_related('created_by', 'category'))
-    sla_breached_tickets = [t for t in all_tickets_list if t.is_sla_breached]
-    sla_breached_count = len(sla_breached_tickets)
-
-    # 3. Müşteri Memnuniyet (CSAT) Metrikleri
-    csat_qs = TicketRating.objects.filter(ticket__in=base_qs)
-    csat_count = csat_qs.count()
-    csat_avg_raw = csat_qs.aggregate(Avg('score'))['score__avg']
-    csat_avg = round(csat_avg_raw, 1) if csat_avg_raw else 0.0
-    satisfied_count = csat_qs.filter(score__gte=4).count()
-    satisfaction_rate = round((satisfied_count / csat_count) * 100, 1) if csat_count > 0 else 0
-
-    # 4. Bu Ay Açılan ve Bu Ay Çözülen Talepler
     now = timezone.now()
     first_day_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    resolved_this_month = base_qs.filter(status='resolved', updated_at__gte=first_day_of_month).count()
-    created_this_month = base_qs.filter(created_at__gte=first_day_of_month).count()
 
-    # 5. Kategori Dağılımı Verileri (Chart.js İçin)
+    # 1. Tekil SQL Koşullu Toplama (Conditional Aggregation) ile Tüm Metrikler (N+1 Sorgu Engellendi)
+    metrics = base_qs.aggregate(
+        total_tickets=Count('id'),
+        open_tickets=Count('id', filter=Q(status='open')),
+        in_progress_tickets=Count('id', filter=Q(status='in_progress')),
+        resolved_tickets=Count('id', filter=Q(status='resolved')),
+        urgent_tickets=Count('id', filter=Q(priority='urgent')),
+        priority_low=Count('id', filter=Q(priority='low')),
+        priority_medium=Count('id', filter=Q(priority='medium')),
+        priority_high=Count('id', filter=Q(priority='high')),
+        priority_urgent=Count('id', filter=Q(priority='urgent')),
+        resolved_this_month=Count('id', filter=Q(status='resolved', updated_at__gte=first_day_of_month)),
+        created_this_month=Count('id', filter=Q(created_at__gte=first_day_of_month)),
+        sla_breached_count=Count('id', filter=Q(status__in=['open', 'in_progress'], sla_deadline__isnull=False, sla_deadline__lt=now)),
+    )
+
+    total_tickets = metrics['total_tickets']
+    open_tickets = metrics['open_tickets']
+    in_progress_tickets = metrics['in_progress_tickets']
+    resolved_tickets = metrics['resolved_tickets']
+    urgent_tickets = metrics['urgent_tickets']
+    resolved_this_month = metrics['resolved_this_month']
+    created_this_month = metrics['created_this_month']
+    sla_breached_count = metrics['sla_breached_count']
+
+    # 2. SLA Geciken İlk 5 Talep (Bellek tüketimi engellendi; SQL index ve LIMIT 5 ile hızlı çekim)
+    sla_breached_tickets = list(
+        base_qs.filter(
+            status__in=['open', 'in_progress'],
+            sla_deadline__isnull=False,
+            sla_deadline__lt=now
+        ).select_related('created_by', 'category').order_by('sla_deadline')[:5]
+    )
+
+    # 3. Müşteri Memnuniyet (CSAT) Metrikleri (Tekil SQL aggregate ile)
+    csat_stats = TicketRating.objects.filter(ticket__in=base_qs).aggregate(
+        count=Count('id'),
+        avg=Avg('score'),
+        satisfied=Count('id', filter=Q(score__gte=4))
+    )
+    csat_count = csat_stats['count']
+    csat_avg = round(csat_stats['avg'], 1) if csat_stats['avg'] else 0.0
+    satisfied_count = csat_stats['satisfied']
+    satisfaction_rate = round((satisfied_count / csat_count) * 100, 1) if csat_count > 0 else 0
+
+    # 4. Kategori Dağılımı Verileri (Chart.js İçin)
     category_labels = [cat.name for cat in categories]
     category_counts = [cat.ticket_count for cat in categories]
 
-    # 6. Öncelik Dağılımı Verileri
+    # 5. Öncelik Dağılımı Verileri
     priority_data = {
-        'Düşük': base_qs.filter(priority='low').count(),
-        'Orta': base_qs.filter(priority='medium').count(),
-        'Yüksek': base_qs.filter(priority='high').count(),
-        'Acil': base_qs.filter(priority='urgent').count(),
+        'Düşük': metrics['priority_low'],
+        'Orta': metrics['priority_medium'],
+        'Yüksek': metrics['priority_high'],
+        'Acil': metrics['priority_urgent'],
     }
 
     context = {
@@ -154,10 +169,31 @@ def verify_email(request):
     user = get_object_or_404(User, id=user_id)
 
     if request.method == 'POST':
+        action = request.POST.get('action')
+
+        # Kodu Tekrar Gönder (Resend OTP)
+        if action == 'resend':
+            verification, _ = EmailVerification.objects.get_or_create(user=user)
+            verification.generate_code()
+            try:
+                send_mail(
+                    subject="E-Posta Dogrulama Kodu (Tekrar)",
+                    message=f"Merhaba {user.username},\n\nYeni dogrulama kodunuz: {verification.code}\n\nBu kod 10 dakika süreyle geçerlidir.",
+                    from_email=None,
+                    recipient_list=[user.email],
+                    fail_silently=True
+                )
+                messages.success(request, f"Yeni doğrulama kodu {user.email} adresine gönderildi.")
+            except Exception:
+                messages.warning(request, "E-posta servisine erişilemedi ancak yeni kod üretildi.")
+            return redirect('verify_email')
+
         entered_code = request.POST.get('code', '').strip()
         try:
             verification = user.email_verification
-            if verification.code == entered_code and verification.is_valid():
+            if verification.failed_attempts >= 5:
+                messages.error(request, "Çok fazla hatalı deneme yaptınız. Güvenliğiniz için bu kod iptal edildi. Lütfen 'Yeni Kod Gönder' butonunu kullanın.")
+            elif verification.code == entered_code and verification.is_valid():
                 # Kod doğru ve süresi geçerli!
                 user.is_active = True
                 user.save()
@@ -168,7 +204,13 @@ def verify_email(request):
                 messages.success(request, f"Tebrikler {user.username}! E-postanız başarıyla doğrulandı ve hesabınız aktifleştirildi.")
                 return redirect('ticket_list')
             else:
-                messages.error(request, "Girdiğiniz doğrulama kodu hatalı veya süresi dolmuş!")
+                verification.failed_attempts += 1
+                verification.save(update_fields=['failed_attempts'])
+                remaining = max(0, 5 - verification.failed_attempts)
+                if remaining > 0:
+                    messages.error(request, f"Girdiğiniz doğrulama kodu hatalı veya süresi dolmuş! (Kalan deneme hakkı: {remaining})")
+                else:
+                    messages.error(request, "5 hatalı deneme hakkınız doldu. Lütfen 'Yeni Kod Gönder' butonunu kullanarak yeni kod talep edin.")
         except EmailVerification.DoesNotExist:
             messages.error(request, "Doğrulama bilgisi bulunamadı.")
 
@@ -185,70 +227,91 @@ def register_user(request):
     """
     if request.user.is_authenticated:
         return redirect('ticket_list')
-    
-    #if request.user.is_authenticated: Zaten giriş yapmış olan bir kullanıcının tekrar kayıt sayfasına girmesini engeller ve ana listeye yönlendirir.
-
 
     if request.method == 'POST':
         form = UserRegisterForm(request.POST)
-        # Kullanıcının girdiği kullanıcı adı ve şifre ikilisini doğrular.
         if form.is_valid():
-
             # 1. Kullanıcıyı henüz pasif (is_active=False) olarak kaydediyoruz
             user = form.save(commit=False)
             user.is_active = False
             user.save()
 
-             # 2. Onay kodu oluşturuyoruz
+            # 2. Onay kodu oluşturuyoruz
             verification, created = EmailVerification.objects.get_or_create(user=user)
             verification.generate_code()
 
-             # 3. E-posta gönderiyoruz
-            send_mail(
-                subject="E-Posta Dogrulama Kodu",
-                message=f"Merhaba {user.username},\n\nDestek Sistemine kayit isleminizi tamamlamak için dogrulama kodunuz: {verification.code}\n\nBu kod 10 dakika süreyle gecerlidir.",
-                from_email=None,
-                recipient_list=[user.email],
-            )
+            # 3. E-posta gönderiyoruz (SMTP bağlantı hatasına karşı korumalı)
+            try:
+                send_mail(
+                    subject="E-Posta Dogrulama Kodu",
+                    message=f"Merhaba {user.username},\n\nDestek Sistemine kayit isleminizi tamamlamak için dogrulama kodunuz: {verification.code}\n\nBu kod 10 dakika süreyle gecerlidir.",
+                    from_email=None,
+                    recipient_list=[user.email],
+                    fail_silently=True
+                )
+            except Exception:
+                pass
+
             # 4. Kullanıcı ID'sini oturuma kaydedip doğrulama sayfasına yönlendiriyoruz
             request.session['unverified_user_id'] = user.id
             messages.info(request, "Lütfen e-posta adresinize gönderilen 6 haneli doğrulama kodunu girin.")
             return redirect('verify_email')
         else:
             messages.error(request, "Lütfen formdaki hataları düzeltin.")
-        #else: Eğer form geçerli değilse (Hata varsa)...
-    
     else:
         form = UserRegisterForm()
-    #else: Eğer POST isteği yoksa (Sayfa ilk açılıyorsa)...
-    context = {'form': form} #form: HTML şablonunda kullanmak üzere form nesnesini bir sözlüğe ekler.
+
+    context = {'form': form}
     return render(request, 'tickets/register.html', context) 
 
 
 
 def login_user(request):
     """
-    Kullanıcı giriş görünümü.
+    Kullanıcı giriş görünümü. ?next= yönlendirmesini destekler ve onaylanmamış hesapları doğrulama sayfasına aktarır.
     """
     if request.user.is_authenticated:
         return redirect('ticket_list')
+
     if request.method == 'POST':
         form = AuthenticationForm(request, data=request.POST)
         if form.is_valid():
-            username = form.cleaned_data.get('username') #cleaned_data: Formdan gelen verileri temizleyip sözlük formatında döndüren yapıdır.
-            password = form.cleaned_data.get('password') #password: Şifreyi güvenli bir şekilde alır.
+            username = form.cleaned_data.get('username')
+            password = form.cleaned_data.get('password')
             user = authenticate(username=username, password=password)
             if user is not None:
+                profile = getattr(user, 'profile', None)
+                if profile and profile.is_2fa_enabled and profile.totp_secret:
+                    request.session['2fa_user_id'] = user.id
+                    request.session['2fa_next'] = request.POST.get('next') or request.GET.get('next') or ''
+                    return redirect('verify_2fa')
+
                 login(request, user)
                 messages.success(request, f"Tekrar hoş geldiniz, {username}!")
+                next_url = request.POST.get('next') or request.GET.get('next')
+                if next_url and next_url.startswith('/'):
+                    return redirect(next_url)
                 return redirect('ticket_list')
             else:
                 messages.error(request, "Kullanıcı adı veya parola hatalı.")
         else:
+            # Kullanıcı adı ve şifre doğru ama hesap henüz doğrulanmamış (is_active=False) olabilir
+            username_input = request.POST.get('username')
+            password_input = request.POST.get('password')
+            if username_input and password_input:
+                unverified_user = User.objects.filter(username=username_input, is_active=False).first()
+                if unverified_user and unverified_user.check_password(password_input):
+                    request.session['unverified_user_id'] = unverified_user.id
+                    messages.info(request, "Hesabınız henüz doğrulanmamış. Lütfen doğrulama kodunu giriniz.")
+                    return redirect('verify_email')
             messages.error(request, "Geçersiz giriş bilgileri.")
     else:
         form = AuthenticationForm()
-    context = {'form': form}
+
+    context = {
+        'form': form,
+        'next': request.GET.get('next', '')
+    }
     return render(request, 'tickets/login.html', context)
 
 
@@ -367,12 +430,19 @@ def ticket_list(request):
     #filter(created_by=request.user): Standart kullanıcıya ait olmayan talepleri daha SQL seviyesinde ayıklar (WHERE created_by_id = ?). 
     # Arama ve filtreler de sadece bu daraltılmış liste üzerinde çalışır.
     
-    # 2. İstatistik Sayaçları (Django ORM .count() Metodu)
-    total_count = base_tickets.count()
-    open_count = base_tickets.filter(status='open').count()
-    in_progress_count = base_tickets.filter(status='in_progress').count()
-    resolved_count = base_tickets.filter(status='resolved').count()
-    urgent_count = base_tickets.filter(priority='urgent').count()
+    # 2. İstatistik Sayaçları (Koşullu Toplama - Tek SQL Sorgusu)
+    counts = base_tickets.aggregate(
+        total=Count('id'),
+        open=Count('id', filter=Q(status='open')),
+        in_progress=Count('id', filter=Q(status='in_progress')),
+        resolved=Count('id', filter=Q(status='resolved')),
+        urgent=Count('id', filter=Q(priority='urgent')),
+    )
+    total_count = counts['total']
+    open_count = counts['open']
+    in_progress_count = counts['in_progress']
+    resolved_count = counts['resolved']
+    urgent_count = counts['urgent']
     
 
     # 3. URL Arama ve Filtreleme İşlemleri
@@ -514,8 +584,7 @@ def ticket_detail(request, pk):
                 return redirect('ticket_list')
 
 
-    # Sistem log metinlerini yorumlar akışından süzüp sadece gerçek kullanıcı yorumlarını çekiyoruz
-    comments = ticket.comments.exclude(content__startswith='Güncelleme yapıldı').exclude(content__startswith='⚙️ Güncelleme yapıldı').exclude(content='Talep detayları güncellendi.')
+    comments = ticket.comments.all()
 
     if not request.user.is_staff:
        comments = comments.filter(is_internal=False)
@@ -581,7 +650,7 @@ def ticket_detail(request, pk):
 
 
             
-            # CANLI BİLDİRİM: Yorumu yazan kişi talep sahibi değilse bildirim oluştur
+            # CANLI BİLDİRİM & E-POSTA 1: Talep sahibine bildirim (Yorumu yazan kişi talep sahibi değilse)
             if comment.author != ticket.created_by:
                 Notification.objects.create(
                     recipient=ticket.created_by,
@@ -589,49 +658,64 @@ def ticket_detail(request, pk):
                     ticket=ticket,
                     message=f"#{ticket.ticket_number} talebinize {comment.author.username} tarafından yanıt eklendi."
                 )
-            # E-POSTA BİLDİRİMİ
-            if comment.author != ticket.created_by and ticket.created_by.email:
-                send_notification_email(
-                    subject=f"[Destek Talebi] #{ticket.ticket_number} Talebinize Yeni Yanıt Geldi",
-                    message=f"Merhaba {ticket.created_by.username},\n\n#{ticket.ticket_number} numaralı '{ticket.title}' başlıklı destek talebinize {comment.author.username} tarafından yeni bir yanıt eklendi:\n\n\"{comment.content}\"\n\nTalebi ve detayları görüntülemek için sisteme giriş yapabilirsiniz.\n\nİyi çalışmalar dileriz.",
-                    recipient_list=[ticket.created_by.email]
+                if ticket.created_by.email:
+                    send_notification_email(
+                        subject=f"[Destek Talebi] #{ticket.ticket_number} Talebinize Yeni Yanıt Geldi",
+                        message=f"Merhaba {ticket.created_by.username},\n\n#{ticket.ticket_number} numaralı '{ticket.title}' başlıklı destek talebinize {comment.author.username} tarafından yeni bir yanıt eklendi:\n\n\"{comment.content}\"\n\nTalebi ve detayları görüntülemek için sisteme giriş yapabilirsiniz.\n\nİyi çalışmalar dileriz.",
+                        recipient_list=[ticket.created_by.email]
+                    )
+
+            # CANLI BİLDİRİM & E-POSTA 2: Atanmış personele bildirim (Müşteri veya başka biri yanıt verdiğinde)
+            if ticket.assigned_to and comment.author != ticket.assigned_to:
+                Notification.objects.create(
+                    recipient=ticket.assigned_to,
+                    actor=comment.author,
+                    ticket=ticket,
+                    message=f"Sorumlu olduğunuz #{ticket.ticket_number} talebine {comment.author.username} tarafından yanıt eklendi."
                 )
+                if ticket.assigned_to.email:
+                    send_notification_email(
+                        subject=f"[Destek Talebi] Sorumlu Olduğunuz #{ticket.ticket_number} Talebine Yeni Yanıt Geldi",
+                        message=f"Merhaba {ticket.assigned_to.username},\n\nSorumlusu olduğunuz #{ticket.ticket_number} numaralı '{ticket.title}' talebine {comment.author.username} tarafından yeni bir yanıt yazıldı:\n\n\"{comment.content}\"\n\nDetayları görüntülemek için sisteme giriş yapabilirsiniz.",
+                        recipient_list=[ticket.assigned_to.email]
+                    )
+
+            # WebSocket Canlı Yorum Dağıtımı (Real-Time Broadcast)
+            try:
+                from asgiref.sync import async_to_sync
+                from channels.layers import get_channel_layer
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    async_to_sync(channel_layer.group_send)(
+                        f"ticket_{ticket.id}",
+                        {
+                            "type": "ticket_comment_broadcast",
+                            "comment_id": comment.id,
+                            "author_id": comment.author.id,
+                            "author_name": comment.author.get_full_name() or comment.author.username,
+                            "is_staff": comment.author.is_staff,
+                            "is_internal": comment.is_internal,
+                            "content": comment.content,
+                            "attachment_url": comment.attachment.url if comment.attachment else "",
+                            "attachment_name": os.path.basename(comment.attachment.name) if comment.attachment else "",
+                            "created_at": comment.created_at.strftime("%d.%m.%Y %H:%M")
+                        }
+                    )
+            except Exception:
+                pass
 
             messages.success(request, "Yorumunuz başarıyla eklendi.")
-
-
-            #comment.author: Yorumu yazan kişiyi (author) oturum açmış kullanıcı olarak atar.
-
-            #comment.save(): Talebi, yazarı ve içeriği artık eksiksiz olan yorumu veritabanına fiziksel olarak kaydeder.
-
-
-            #return redirect('ticket_detail', pk=ticket.pk): İşlem başarılı olduğu için tarayıcıyı 
-            #tam olarak aynı sayfanın (talebin detay sayfası) yenilenmiş haline yönlendirir. 
-            #Böylece kullanıcı, sayfayı manuel yenilemeden yeni yorumunu hemen listede görür.
-
-            # Sayfayı yenileyerek yorumun anında görünmesini sağla
             return redirect('ticket_detail', pk=ticket.pk)
 
-            #Sayfayı Yeniden Yükleme (PRG Prensibi): Kayıt bitince sayfayı temiz bir GET isteğiyle yeniden açar. 
-            #Böylece yeni yazılan yorum anında sayfada belirir ve kullanıcı sayfayı yenilediğinde (F5) aynı yorum mükerrer eklenmez.
-
-
-
     else:
-        # Sayfa ilk kez açıldıysa (GET isteği) boş yorum formu üret
         comment_form = CommentForm(user=request.user)
 
+    canned_responses = []
+    if request.user.is_staff:
+        canned_responses = CannedResponse.objects.filter(
+            Q(category=ticket.category) | Q(category__isnull=True)
+        )
 
-
-        #Sayfaya ilk kez girildiğinde (GET), 
-        #kullanıcıya sunulmak üzere boş bir CommentForm() üretilir 
-        #ve context paketine eklenerek HTML şablonuna gönderilir.
-
-
-
-
-    
-    
     # 3. HTML şablonuna gönderilecek veri paketini hazırlınır
     context = {
         'ticket': ticket,
@@ -639,6 +723,7 @@ def ticket_detail(request, pk):
         'comment_form': comment_form,
         'activity_logs': ticket.activity_logs.all(),
         'has_solution': comments.filter(is_solution=True).exists(),
+        'canned_responses': canned_responses,
     }
 
     """
@@ -715,6 +800,21 @@ def ticket_create(request):
                action="Destek talebi oluşturuldu."
             )
 
+            # CANLI BİLDİRİM & E-POSTA: Başka bir personele atanarak oluşturulduysa o personele bildir
+            if ticket.assigned_to and ticket.assigned_to != request.user:
+                Notification.objects.create(
+                    recipient=ticket.assigned_to,
+                    actor=request.user,
+                    ticket=ticket,
+                    message=f"#{ticket.ticket_number} talebi size atandı."
+                )
+                if ticket.assigned_to.email:
+                    send_notification_email(
+                        subject=f"[Destek Talebi] #{ticket.ticket_number} Talebi Size Atandı",
+                        message=f"Merhaba {ticket.assigned_to.username},\n\n#{ticket.ticket_number} numaralı '{ticket.title}' başlıklı yeni destek talebi tarafınıza atanmıştır.\n\nDetayları incelemek için sisteme giriş yapabilirsiniz.",
+                        recipient_list=[ticket.assigned_to.email]
+                    )
+
 
 
         # E-POSTA BİLDİRİMİ: Kullanıcıya Teyit Maili Gönder
@@ -789,29 +889,13 @@ def ticket_edit(request, pk):
         # Eski değerleri karşılaştırmak için hafızaya alıyoruz
         old_status = ticket.get_status_display()
         old_assigned = ticket.assigned_to.username if ticket.assigned_to else "Atanmadı"
-        
-        
-        
+        old_assigned_user = ticket.assigned_to
         
         form = TicketForm(request.POST, request.FILES, instance=ticket, user=request.user)
-        # request.FILES: Kullanıcının form üzerinden yüklediği dosya verilerini tutan sözlüktür.
-        # request.POST: Kullanıcının form üzerinden gönderdiği metin verilerini (başlık, açıklama, kategori vb.) tutar.
-        # user=request.user: Formun içine, şu an giriş yapmış olan kullanıcının bilgilerini "yazar" olarak kaydeder.
-        '''
-        Django standart form verilerini (başlık, açıklama vb.) request.POST içinde taşır.
-        Kullanıcının bilgisayarından seçip yüklediği resim/dosya verileri ise ayrı bir paket olan request FILES içerisinde gelir. 
-        Form nesnesine request.FILES parametresini vermezsek Django yüklenen dosyayı görmezden gelir ve kaydetmez.
-        '''  
-
-        # Bir form HTML sayfasıdır. Kullanıcı bu formu doldurup "Gönder" (Submit) butonuna tıkladığında,
-        #  tarayıcı sayfanın URL'ine bir POST isteği gönderir.
-        # Kullanıcının girdiği verileri (request.POST) alıp forma yükler.
 
         if form.is_valid(): # Form kurallara uygunsa (boş bırakılan zorunlu alan yoksa vb.)
             
             updated_ticket = form.save()
-            # ticket = form.save(commit=False): Formdaki verilerden bir Ticket nesnesi üretir ama henüz veritabanına kaydetmez, bellekte bekletir.
-        
             
             # Değişiklikleri ve yeni durumları tespit edelim (new_status önceden tanımlanıyor)
             changes = []
@@ -828,8 +912,21 @@ def ticket_edit(request, pk):
                     message=f"#{updated_ticket.ticket_number} talebinizin durumu '{new_status}' olarak güncellendi."
                 )
 
+            # CANLI BİLDİRİM & E-POSTA: Atanan personel değiştiyse yeni personele bildir
+            if updated_ticket.assigned_to and updated_ticket.assigned_to != old_assigned_user and updated_ticket.assigned_to != request.user:
+                Notification.objects.create(
+                    recipient=updated_ticket.assigned_to,
+                    actor=request.user,
+                    ticket=updated_ticket,
+                    message=f"#{updated_ticket.ticket_number} talebi size atandı."
+                )
+                if updated_ticket.assigned_to.email:
+                    send_notification_email(
+                        subject=f"[Destek Talebi] #{updated_ticket.ticket_number} Talebi Size Atandı",
+                        message=f"Merhaba {updated_ticket.assigned_to.username},\n\n#{updated_ticket.ticket_number} numaralı '{updated_ticket.title}' başlıklı destek talebi tarafınıza atanmıştır.\n\nDetayları incelemek için sisteme giriş yapabilirsiniz.",
+                        recipient_list=[updated_ticket.assigned_to.email]
+                    )
 
-            
            # E-POSTA BİLDİRİMİ: Eğer durum değişmişse mail gönder
             if old_status != new_status and updated_ticket.created_by.email:
                 send_notification_email(
@@ -887,7 +984,9 @@ def ticket_edit(request, pk):
 def ticket_delete(request, pk):
     """
     Destek talebi silme görünümü.
-    Süper yöneticiler tüm talepleri, personel ise yalnızca sorumlu olduğu departmanın taleplerini silebilir.
+    - Süper yöneticiler tüm talepleri silebilir.
+    - Personel yalnızca sorumlu olduğu departmanın taleplerini silebilir.
+    - Standart kullanıcılar yalnızca kendi açtıkları ve henüz çözülmemiş/kapatılmamış talepleri silebilir.
     GET isteğinde onay sayfasını gösterir, POST isteğinde talebi kalıcı olarak siler.
     """
     ticket = get_object_or_404(Ticket, pk=pk)
@@ -895,17 +994,22 @@ def ticket_delete(request, pk):
     profile = getattr(request.user, 'profile', None)
     is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
 
-    # Güvenlik Kontrolü 1: Yalnızca yetkili personel silebilir
+    # Yetki Kontrolü:
     if not request.user.is_staff:
-        messages.error(request, "Destek taleplerini yalnızca yetkili yöneticiler silebilir!")
-        return redirect('ticket_list')
-
-    # Güvenlik Kontrolü 2: RBAC Departman İzolasyonu (Personel başka birimin talebini silemez)
-    if not is_superadmin and ticket.category:
-        if profile and profile.assigned_categories.exists():
-            if not profile.assigned_categories.filter(id=ticket.category.id).exists():
-                messages.error(request, "Bu departman/kategoriye ait talepleri silme yetkiniz bulunmamaktadır!")
-                return redirect('ticket_list')
+        # Standart kullanıcı kontrolü
+        if ticket.created_by != request.user:
+            messages.error(request, "Yalnızca kendi açtığınız destek taleplerini silebilirsiniz!")
+            return redirect('ticket_list')
+        if ticket.status in ['resolved', 'closed']:
+            messages.error(request, "Çözülmüş veya kapatılmış destek talepleri silinemez!")
+            return redirect('ticket_detail', pk=ticket.pk)
+    else:
+        # Personel RBAC Departman İzolasyonu (Süper yönetici değilse başka birimin talebini silemez)
+        if not is_superadmin and ticket.category:
+            if profile and profile.assigned_categories.exists():
+                if not profile.assigned_categories.filter(id=ticket.category.id).exists():
+                    messages.error(request, "Bu departman/kategoriye ait talepleri silme yetkiniz bulunmamaktadır!")
+                    return redirect('ticket_list')
 
     if request.method == 'POST':
         ticket_title = ticket.title
@@ -975,9 +1079,25 @@ def change_password_view(request):
 
 
 
+def _async_email_worker(subject, message, recipient_list):
+    try:
+        from django.conf import settings
+        if not settings.DEBUG:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=None,
+                recipient_list=[email for email in recipient_list if email],
+                fail_silently=True
+            )
+    except Exception:
+        pass
+
+
 def send_notification_email(subject, message, recipient_list):
     """
-    Güvenli E-posta Bildirim Gönderici Yardımcı Fonksiyonu.
+    Güvenli ve Asenkron (Non-blocking) E-posta Bildirim Gönderici.
+    Ana HTTP istek döngüsünü bloke etmeden (0ms bekleme ile) arka planda e-posta gönderir.
     """
     if recipient_list and any(recipient_list):
         recipients = ", ".join([e for e in recipient_list if e])
@@ -985,27 +1105,21 @@ def send_notification_email(subject, message, recipient_list):
         # Terminalde temiz ve tek bir Türkçe bildirim gösterelim:
         try:
             print("\n" + "="*60)
-            print(f"[E-POSTA] E-POSTA BİLDİRİMİ GÖNDERİLDİ")
+            print(f"[E-POSTA] E-POSTA BİLDİRİMİ GÖNDERİLDİ (Asenkron Arka Plan)")
             print(f"Alıcı : {recipients}")
             print(f"Konu  : {subject}")
             print(f"İçerik:\n{message}")
             print("="*60 + "\n")
         except Exception:
             pass
-        
-        try:
-            # Gerçek sunucuda (SMTP) mail gönderir, geliştirme modunda konsolda tekrar basmaması için:
-            from django.conf import settings
-            if not settings.DEBUG:
-                send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=None,
-                    recipient_list=[email for email in recipient_list if email],
-                    fail_silently=True
-                )
-        except Exception:
-            pass
+
+        # Arka planda asenkron iş parçacığı (daemon thread) ile e-posta gönderimi
+        worker_thread = threading.Thread(
+            target=_async_email_worker,
+            args=(subject, message, recipient_list),
+            daemon=True
+        )
+        worker_thread.start()
 
 
 
@@ -1242,11 +1356,12 @@ def get_chat_messages_api(request, chat_type, chat_id):
 
 
 @login_required
+@require_POST
 def toggle_comment_solution(request, comment_id):
     """
     Bir yorumu En İyi Yanıt / Çözüm olarak işaretler veya işaretini kaldırır.
     İzin: Sadece talebi açan kullanıcı veya yöneticiler (is_staff) işlem yapabilir.
-    AJAX / Fetch API ile sayfa yenilenmeden çalışmayı destekler.
+    CSRF korumalı POST istekleriyle çalışır.
     """
     comment = get_object_or_404(TicketComment, id=comment_id)
     ticket = comment.ticket
@@ -1309,10 +1424,11 @@ def toggle_comment_solution(request, comment_id):
 
 
 @login_required
+@require_POST
 def toggle_comment_like(request, comment_id):
     """
     Bir yorumu faydalı bulup beğenmeyi (upvote) veya beğeniyi kaldırmayı sağlar.
-    AJAX / Fetch API ile sayfa yenilenmeden çalışmayı destekler.
+    CSRF korumalı POST istekleriyle çalışır.
     """
     comment = get_object_or_404(TicketComment, id=comment_id)
     ticket = comment.ticket
@@ -1348,11 +1464,12 @@ def toggle_comment_like(request, comment_id):
 def knowledge_base_list_view(request):
     """
     Sıkça sorulan sorular (SSS) ve Bilgi Bankası makale listesi.
+    Dinamik Category modeli üzerinden kategori bazlı filtreleme ve sayaç sunar.
     """
     q = request.GET.get('q', '').strip()
     selected_category = request.GET.get('category', '').strip()
 
-    articles = KnowledgeBaseArticle.objects.filter(is_published=True)
+    articles = KnowledgeBaseArticle.objects.filter(is_published=True).select_related('category')
 
     if q:
         articles = articles.filter(
@@ -1362,17 +1479,25 @@ def knowledge_base_list_view(request):
         )
 
     if selected_category:
-        articles = articles.filter(category=selected_category)
+        if selected_category.isdigit():
+            articles = articles.filter(category_id=int(selected_category))
+        else:
+            articles = articles.filter(category__name__icontains=selected_category)
 
-    # Kategori istatistikleri
-    categories_stats = []
-    for cat_code, cat_name in KnowledgeBaseArticle.CATEGORY_CHOICES:
-        count = KnowledgeBaseArticle.objects.filter(is_published=True, category=cat_code).count()
-        categories_stats.append({
-            'code': cat_code,
-            'name': cat_name,
-            'count': count,
-        })
+    # Dinamik Kategori istatistikleri (Yayınlanmış makalesi olan kategoriler)
+    categories = Category.objects.annotate(
+        article_count=Count('kb_articles', filter=Q(kb_articles__is_published=True))
+    ).filter(article_count__gt=0).order_by('name')
+
+    categories_stats = [
+        {
+            'code': str(cat.id),
+            'id': cat.id,
+            'name': cat.name,
+            'count': cat.article_count,
+        }
+        for cat in categories
+    ]
 
     paginator = Paginator(articles, 8)
     page_number = request.GET.get('page')
@@ -1383,7 +1508,6 @@ def knowledge_base_list_view(request):
         'categories_stats': categories_stats,
         'search_query': q,
         'selected_category': selected_category,
-        'category_choices': KnowledgeBaseArticle.CATEGORY_CHOICES,
     }
     return render(request, 'tickets/knowledge_base.html', context)
 
@@ -1392,15 +1516,20 @@ def knowledge_base_detail_view(request, pk):
     """
     Tek bir Bilgi Bankası makalesinin detay sayfası.
     """
-    article = get_object_or_404(KnowledgeBaseArticle, pk=pk, is_published=True)
-    # Görüntülenme sayacını artır
-    KnowledgeBaseArticle.objects.filter(pk=pk).update(views_count=article.views_count + 1)
+    article = get_object_or_404(KnowledgeBaseArticle.objects.select_related('category'), pk=pk, is_published=True)
+    # Görüntülenme sayacını atomik olarak artır (Race condition engellendi)
+    KnowledgeBaseArticle.objects.filter(pk=pk).update(views_count=F('views_count') + 1)
     article.refresh_from_db(fields=['views_count'])
 
     # Benzer / İlgili makaleler
-    related_articles = KnowledgeBaseArticle.objects.filter(
-        is_published=True, category=article.category
-    ).exclude(pk=article.pk)[:4]
+    if article.category:
+        related_articles = KnowledgeBaseArticle.objects.filter(
+            is_published=True, category=article.category
+        ).exclude(pk=article.pk)[:4]
+    else:
+        related_articles = KnowledgeBaseArticle.objects.filter(
+            is_published=True
+        ).exclude(pk=article.pk)[:4]
 
     context = {
         'article': article,
@@ -1422,7 +1551,7 @@ def kb_suggest_api(request):
     # 1. Bilgi Bankası Makaleleri
     kb_qs = KnowledgeBaseArticle.objects.filter(
         is_published=True
-    ).filter(
+    ).select_related('category').filter(
         Q(title__icontains=q) | Q(keywords__icontains=q) | Q(content__icontains=q)
     )[:4]
 
@@ -1430,7 +1559,7 @@ def kb_suggest_api(request):
         suggestions.append({
             'id': item.id,
             'title': item.title,
-            'category': item.get_category_display(),
+            'category': item.category.name if item.category else 'Genel',
             'snippet': (item.content[:120] + '...') if len(item.content) > 120 else item.content,
             'url': f"/knowledge-base/{item.id}/",
             'type': 'kb',
@@ -1757,7 +1886,20 @@ def bulk_ticket_action(request):
                         actor=request.user,
                         action=f"Toplu İşlem: Talep {assignee.username} yöneticisine atandı."
                     )
+                    if assignee != request.user:
+                        Notification.objects.create(
+                            recipient=assignee,
+                            actor=request.user,
+                            ticket=t,
+                            message=f"#{t.ticket_number} talebi size atandı."
+                        )
                     updated_count += 1
+                if assignee != request.user and assignee.email and updated_count > 0:
+                    send_notification_email(
+                        subject=f"[Destek Talebi] Size {updated_count} Adet Talep Atandı",
+                        message=f"Merhaba {assignee.username},\n\nSistem üzerinden tarafınıza {updated_count} adet yeni destek talebi atanmıştır.\n\nTalepleri incelemek için sisteme giriş yapabilirsiniz.",
+                        recipient_list=[assignee.email]
+                    )
                 messages.success(request, f"{updated_count} adet talep {assignee.username} yöneticisine atandı.")
             except (ValueError, User.DoesNotExist):
                 messages.error(request, "Seçilen yönetici bulunamadı.")
@@ -1782,4 +1924,290 @@ def bulk_ticket_action(request):
         messages.warning(request, "Geçersiz işlem seçildi.")
 
     return redirect('ticket_list')
+
+
+# ==========================================
+# 2FA (İKİ AŞAMALI DOĞRULAMA - TOTP) GÖRÜNÜMLERİ
+# ==========================================
+
+@login_required
+def setup_2fa_view(request):
+    """
+    Kullanıcıya Google Authenticator / Authy uyumlu 2FA kurulumu sunar.
+    QR kod ve manuel gizli anahtarı gösterir, kullanıcının girdiği kodu doğrulayarak aktifleştirir.
+    """
+    profile = getattr(request.user, 'profile', None)
+    if not profile:
+        profile = UserProfile.objects.create(user=request.user)
+
+    if profile.is_2fa_enabled:
+        messages.info(request, "İki Aşamalı Doğrulama (2FA) hesabınızda zaten aktif.")
+        return redirect('profile')
+
+    # Session'da bekleyen gizli anahtar varsa al, yoksa yeni üret
+    pending_secret = request.session.get('pending_totp_secret')
+    if not pending_secret:
+        pending_secret = generate_totp_secret()
+        request.session['pending_totp_secret'] = pending_secret
+
+    totp_uri = get_totp_uri(pending_secret, request.user.username)
+    qr_data_uri = generate_qr_code_data_uri(totp_uri)
+
+    if request.method == 'POST':
+        token = request.POST.get('token', '').strip()
+        if verify_totp_token(pending_secret, token):
+            profile.totp_secret = pending_secret
+            profile.is_2fa_enabled = True
+            profile.save(update_fields=['totp_secret', 'is_2fa_enabled'])
+            if 'pending_totp_secret' in request.session:
+                del request.session['pending_totp_secret']
+            messages.success(request, "Tebrikler! İki Aşamalı Doğrulama (2FA) başarıyla etkinleştirildi.")
+            return redirect('profile')
+        else:
+            messages.error(request, "Girilen 6 haneli doğrulama kodu hatalı. Lütfen uygulamanızdaki güncel kodu giriniz.")
+
+    context = {
+        'secret': pending_secret,
+        'qr_data_uri': qr_data_uri,
+        'totp_uri': totp_uri,
+    }
+    return render(request, 'tickets/setup_2fa.html', context)
+
+
+@login_required
+@require_POST
+def disable_2fa_view(request):
+    """
+    Kullanıcının 2FA korumasını mevcut şifresini onaylatarak devre dışı bırakır.
+    """
+    password = request.POST.get('password', '').strip()
+    if not request.user.check_password(password):
+        messages.error(request, "2FA'yı kapatmak için hesap şifrenizi doğru girmelisiniz.")
+        return redirect('profile')
+
+    profile = getattr(request.user, 'profile', None)
+    if profile:
+        profile.is_2fa_enabled = False
+        profile.totp_secret = ""
+        profile.save(update_fields=['is_2fa_enabled', 'totp_secret'])
+        messages.success(request, "İki Aşamalı Doğrulama (2FA) başarıyla devre dışı bırakıldı.")
+
+    return redirect('profile')
+
+
+def verify_2fa_view(request):
+    """
+    2FA aktif kullanıcıların şifre doğrulamasından sonra 6 haneli kodu girdiği ara doğrulama görünümü.
+    """
+    user_id = request.session.get('2fa_user_id')
+    if not user_id:
+        return redirect('login')
+
+    user = get_object_or_404(User, id=user_id)
+    profile = getattr(user, 'profile', None)
+    if not profile or not profile.is_2fa_enabled or not profile.totp_secret:
+        # 2FA gereksinimi yoksa oturum açtır
+        login(request, user)
+        if '2fa_user_id' in request.session:
+            del request.session['2fa_user_id']
+        return redirect('ticket_list')
+
+    if request.method == 'POST':
+        token = request.POST.get('token', '').strip()
+        if verify_totp_token(profile.totp_secret, token):
+            login(request, user)
+            next_url = request.session.pop('2fa_next', None)
+            if '2fa_user_id' in request.session:
+                del request.session['2fa_user_id']
+            messages.success(request, f"İki aşamalı doğrulama başarılı! Tekrar hoş geldiniz, {user.username}.")
+            if next_url and next_url.startswith('/'):
+                return redirect(next_url)
+            return redirect('ticket_list')
+        else:
+            messages.error(request, "Doğrulama kodu hatalı veya süresi geçmiş. Lütfen Authenticator uygulamanızı kontrol edin.")
+
+    # Kullanıcı e-postasını maskeleme (örn: ah***@domain.com)
+    email = user.email
+    masked_email = ""
+    if email and "@" in email:
+        parts = email.split("@", 1)
+        local = parts[0]
+        domain = parts[1]
+        masked_email = (local[:2] + "***@" + domain) if len(local) > 2 else (local + "***@" + domain)
+
+    return render(request, 'tickets/verify_2fa.html', {
+        'username': user.username,
+        'masked_email': masked_email,
+    })
+
+
+# ==========================================
+# HAZIR YANIT ŞABLONLARI (CANNED RESPONSES) API
+# ==========================================
+
+@login_required
+def canned_responses_api(request):
+    """
+    Destek ekibi için kategoriye göre filtrelenmiş hazır yanıt şablonlarını JSON olarak döndürür.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Yetkisiz işlem'}, status=403)
+
+    category_id = request.GET.get('category_id')
+    qs = CannedResponse.objects.all()
+    if category_id:
+        qs = qs.filter(Q(category_id=category_id) | Q(category__isnull=True))
+
+    data = [
+        {
+            'id': cr.id,
+            'title': cr.title,
+            'content': cr.content,
+            'category': cr.category.name if cr.category else None,
+        }
+        for cr in qs
+    ]
+    return JsonResponse({'status': 'success', 'canned_responses': data})
+
+
+# ==========================================
+# E-POSTA ÜZERİNDEN YANITLAMA (INBOUND EMAIL WEBHOOK)
+# ==========================================
+
+@csrf_exempt
+@require_POST
+def inbound_email_webhook(request):
+    """
+    Gelen e-postaları ayrıştırarak doğrudan ilgili destek talebine yorum olarak ekleyen webhook.
+    E-posta başlığından / konusundan (#DES-XXXXX veya #ID) talep bulunur.
+    Güvenlik: 'X-Webhook-Secret' başlığı veya ?token= parametresi ile doğrulanır.
+    """
+    from django.conf import settings
+    expected_secret = getattr(settings, 'INBOUND_EMAIL_WEBHOOK_SECRET', settings.SECRET_KEY[:32])
+
+    provided_secret = request.headers.get('X-Webhook-Secret') or request.GET.get('token')
+    if not provided_secret or provided_secret != expected_secret:
+        return JsonResponse({'error': 'Geçersiz webhook gizli anahtarı (secret).'}, status=403)
+
+    try:
+        # JSON veya Standart Form/Multipart veri desteği
+        if request.content_type == 'application/json':
+            payload = json.loads(request.body.decode('utf-8'))
+        else:
+            payload = request.POST.dict()
+
+        sender_raw = payload.get('from') or payload.get('sender') or ''
+        subject = payload.get('subject') or ''
+        body = payload.get('text') or payload.get('body') or payload.get('html') or ''
+
+        # 1. Talep Numarasını Tespit Et (#DES-XXXXX veya #ID)
+        ticket_match = re.search(r'#(?:DES-)?([A-Za-z0-9-]+)', subject)
+        if not ticket_match:
+            ticket_match = re.search(r'#(?:DES-)?([A-Za-z0-9-]+)', body)
+
+        if not ticket_match:
+            return JsonResponse({'error': 'E-posta başlığında veya içeriğinde geçerli talep takip numarası (#DES-...) bulunamadı.'}, status=400)
+
+        raw_num = ticket_match.group(1).strip()
+        clean_digits = re.sub(r'\D', '', raw_num)
+        ticket = None
+        if clean_digits and clean_digits.isdigit():
+            ticket = Ticket.objects.filter(id=int(clean_digits)).first()
+        if not ticket and raw_num.isdigit():
+            ticket = Ticket.objects.filter(id=int(raw_num)).first()
+
+        if not ticket:
+            return JsonResponse({'error': f"'{raw_num}' numaralı talep bulunamadı."}, status=404)
+
+        # 2. Gönderici Kullanıcıyı Tespit Et
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+', sender_raw)
+        sender_email = email_match.group(0).lower() if email_match else ''
+        author = User.objects.filter(email__iexact=sender_email).first()
+
+        if not author:
+            # Sistemde kayıtlı değilse talep sahibini varsay
+            author = ticket.created_by
+
+        # 3. Alıntı / Geçmiş Metinleri Temizle
+        cleaned_lines = []
+        for line in body.splitlines():
+            stripped = line.strip()
+            # Standart mail alıntı satırlarını atla
+            if stripped.startswith('>') or stripped.startswith('---') or (stripped.startswith('On ') and 'wrote:' in stripped):
+                break
+            if 'Kimden:' in stripped and 'Tarih:' in stripped:
+                break
+            cleaned_lines.append(line)
+
+        clean_text = "\n".join(cleaned_lines).strip()
+        if not clean_text:
+            clean_text = body.strip()
+
+        # HTML / XSS Temizliği
+        sanitized_content = nh3.clean(clean_text)
+
+        # 4. Yorumu Kaydet
+        comment = TicketComment.objects.create(
+            ticket=ticket,
+            author=author,
+            content=sanitized_content,
+            is_internal=False
+        )
+
+        # SLA İlk Yanıt Takibi
+        if author.is_staff and not ticket.first_response_at:
+            ticket.first_response_at = timezone.now()
+            ticket.save(update_fields=['first_response_at'])
+
+        # 5. İlgili Taraflara Bildirim Gönder
+        if author != ticket.created_by:
+            Notification.objects.create(
+                recipient=ticket.created_by,
+                actor=author,
+                ticket=ticket,
+                message=f"#{ticket.ticket_number} talebinize e-posta yoluyla yeni yanıt eklendi."
+            )
+
+        if ticket.assigned_to and author != ticket.assigned_to:
+            Notification.objects.create(
+                recipient=ticket.assigned_to,
+                actor=author,
+                ticket=ticket,
+                message=f"Sorumlu olduğunuz #{ticket.ticket_number} talebine e-posta üzerinden yanıt geldi."
+            )
+
+        # 6. Canlı WebSocket Grubuna Broadcast Gönder
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    f"ticket_{ticket.id}",
+                    {
+                        "type": "ticket_comment_broadcast",
+                        "comment_id": comment.id,
+                        "author_id": author.id,
+                        "author_name": author.get_full_name() or author.username,
+                        "is_staff": author.is_staff,
+                        "is_internal": False,
+                        "content": comment.content,
+                        "attachment_url": "",
+                        "attachment_name": "",
+                        "created_at": comment.created_at.strftime("%d.%m.%Y %H:%M")
+                    }
+                )
+        except Exception:
+            pass
+
+        return JsonResponse({
+            'status': 'success',
+            'ticket_id': ticket.id,
+            'ticket_number': ticket.ticket_number,
+            'comment_id': comment.id,
+            'message': 'E-posta yanıtı başarıyla talebe eklendi ve canlı yayınlandı.'
+        })
+
+    except Exception as e:
+        return JsonResponse({'error': f'Ayrıştırma hatası: {str(e)}'}, status=500)
 

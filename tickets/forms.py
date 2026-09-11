@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from .models import Ticket, TicketComment # Formun hangi veritabanı tablosunu temel alacağını belirtmek için Ticket ve TicketComment modelini içe aktarır.
 from django.contrib.auth.forms import UserCreationForm 
 from captcha.fields import CaptchaField 
+import nh3
 from .validators import validate_file_security
 
 class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından türeyen bir form sınıfı tanımlar. Bu sayede Ticket modelindeki alanları otomatik olarak bir web formuna dönüştürür.
@@ -35,6 +36,21 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
         if attachment:
             validate_file_security(attachment)
         return attachment
+
+    def clean_description(self):
+        description = self.cleaned_data.get('description', '')
+        if description:
+            # Quill editöründen gelen HTML içeriğini zararlı XSS kodlarından arındır
+            description = nh3.clean(
+                description,
+                tags={'p', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                      'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'br', 'span', 'a'},
+                attributes={
+                    'a': {'href', 'title', 'target'},
+                    '*': {'class'}
+                }
+            )
+        return description
 
     class Meta: # Django'ya bu formun hangi modeli kullanacağını ve hangi alanları göstereceğini bildirir
         model = Ticket # Formun Ticket veritabanı tablosundan türetileceğini belirtir.
@@ -210,9 +226,11 @@ class UserRegisterForm(UserCreationForm):
 
 class UserProfileForm(forms.ModelForm):
     """
-    Kullanıcı profil bilgilerini (kullanıcı adı ve e-posta) güncelleme formu.
+    Kullanıcı profil bilgilerini (ad, soyad, kullanıcı adı ve e-posta) güncelleme formu.
     Güvenlik için mevcut şifre onayı gerektirir.
     """
+    first_name = forms.CharField(max_length=150, required=False, label="Ad")
+    last_name = forms.CharField(max_length=150, required=False, label="Soyad")
     email = forms.EmailField(required=True, label="E-posta Adresi")
     
     # Güvenlik için eklendi:
@@ -224,7 +242,7 @@ class UserProfileForm(forms.ModelForm):
 
     class Meta:
         model = User
-        fields = ['username', 'email']
+        fields = ['first_name', 'last_name', 'username', 'email']
 
     def __init__(self, *args, **kwargs):
         self.user = kwargs.pop('user', None)  # Görünümden gelen aktif kullanıcı nesnesi

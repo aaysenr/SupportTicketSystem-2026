@@ -11,10 +11,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         recipient = options['email']
-        mailer_conf = getattr(settings, 'MAILERS', {}).get('default', {})
-        backend = mailer_conf.get('BACKEND', getattr(settings, 'EMAIL_BACKEND', 'Bilinmiyor'))
-        host = mailer_conf.get('HOST', 'Console (Terminal)')
-        port = mailer_conf.get('PORT', '-')
+        backend = getattr(settings, 'EMAIL_BACKEND', 'Bilinmiyor')
+        host = getattr(settings, 'EMAIL_HOST', 'Console (Terminal)')
+        port = getattr(settings, 'EMAIL_PORT', '-')
         from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@desteksistemi.com')
 
         self.stdout.write(self.style.NOTICE(f"E-Posta Servisi Test Ediliyor..."))

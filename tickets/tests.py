@@ -6,8 +6,9 @@ from django.urls import reverse
 from io import StringIO
 from django.core.management import call_command
 from django.conf import settings
-from tickets.models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, Notification, ChatGroup, ChatMessage
+from tickets.models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, Notification, ChatGroup, ChatMessage, EmailVerification, CannedResponse
 from tickets.validators import validate_file_security
+from tickets.totp import generate_totp_secret, get_totp_token, verify_totp_token
 from django.utils import timezone
 from datetime import timedelta
 
@@ -125,13 +126,17 @@ class SecurityAndRBACWorkflowTests(TestCase):
 
     # 4. YORUM BEĞENİ VE ÇÖZÜM İŞARETLEME (VE GERİ ALMA) TESTLERİ
     def test_toggle_comment_solution_and_undo(self):
-        """Yorumu çözüm işaretleme ve geri alma durumunu test et."""
+        """Yorumu çözüm işaretleme ve geri alma durumunu test et (Yalnızca POST kabul edilmeli)."""
         comment = TicketComment.objects.create(ticket=self.ticket_tech, author=self.tech_user, content="Çözüm adımı")
         self.client.login(username='superadmin', password='AdminPass123!')
-
-        # 1. Çözüm olarak işaretle
         url = reverse('toggle_comment_solution', kwargs={'comment_id': comment.id})
-        response = self.client.get(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest', HTTP_ACCEPT='application/json')
+
+        # GET isteği 405 (Method Not Allowed) dönmeli (CSRF güvenliği)
+        res_get = self.client.get(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(res_get.status_code, 405)
+
+        # 1. POST ile çözüm olarak işaretle
+        response = self.client.post(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest', HTTP_ACCEPT='application/json')
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data['status'], 'ok')
@@ -139,7 +144,7 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertEqual(data['ticket_status'], 'resolved')
 
         # 2. Geri Al (Undo): Çözüm işaretini kaldır
-        response_undo = self.client.get(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest', HTTP_ACCEPT='application/json')
+        response_undo = self.client.post(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest', HTTP_ACCEPT='application/json')
         self.assertEqual(response_undo.status_code, 200)
         data_undo = response_undo.json()
         self.assertEqual(data_undo['status'], 'ok')
@@ -147,13 +152,17 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertEqual(data_undo['ticket_status'], 'in_progress')
 
     def test_toggle_comment_like_and_undo(self):
-        """Yorumu beğenme ve beğeniyi geri alma durumunu test et."""
+        """Yorumu beğenme ve beğeniyi geri alma durumunu test et (Yalnızca POST kabul edilmeli)."""
         comment = TicketComment.objects.create(ticket=self.ticket_tech, author=self.tech_user, content="Faydalı yorum")
         self.client.login(username='john_doe', password='UserPass123!')
-
-        # 1. Beğen (Faydalı bul)
         url = reverse('toggle_comment_like', kwargs={'comment_id': comment.id})
-        response = self.client.get(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest', HTTP_ACCEPT='application/json')
+
+        # GET isteği 405 (Method Not Allowed) dönmeli
+        res_get = self.client.get(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(res_get.status_code, 405)
+
+        # 1. POST ile beğen (Faydalı bul)
+        response = self.client.post(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest', HTTP_ACCEPT='application/json')
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data['status'], 'ok')
@@ -161,7 +170,7 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertEqual(data['like_count'], 1)
 
         # 2. Geri Al (Undo): Beğeniyi kaldır
-        response_undo = self.client.get(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest', HTTP_ACCEPT='application/json')
+        response_undo = self.client.post(url, HTTP_X_REQUESTED_WITH='XMLHttpRequest', HTTP_ACCEPT='application/json')
         self.assertEqual(response_undo.status_code, 200)
         data_undo = response_undo.json()
         self.assertEqual(data_undo['status'], 'ok')
@@ -208,7 +217,7 @@ class SecurityAndRBACWorkflowTests(TestCase):
         """Bilgi Bankası listeleme, detay ve canlı suggest API'sini test et."""
         article = KnowledgeBaseArticle.objects.create(
             title='E-Posta Kurulum Rehberi',
-            category='technical',
+            category=self.cat_tech,
             content='Outlook ve Thunderbird kurulum parametreleri...',
             keywords='mail, eposta, imap, pop3'
         )
@@ -263,8 +272,9 @@ class SecurityAndRBACWorkflowTests(TestCase):
         """Silme yetkisinin yalnızca yetkili veya sorumlu departman personeliyle sınırlandığını test et."""
         delete_url = reverse('ticket_delete', kwargs={'pk': self.ticket_tech.pk})
 
-        # 1. Normal kullanıcı silemez (302 redirect ve hata mesajı)
-        self.client.login(username='john_doe', password='UserPass123!')
+        # 1. Talebin sahibi olmayan başka bir normal kullanıcı silemez (302 redirect ve hata mesajı)
+        other_user = User.objects.create_user(username='other_normal', password='UserPass123!')
+        self.client.login(username='other_normal', password='UserPass123!')
         res_user = self.client.post(delete_url)
         self.assertEqual(res_user.status_code, 302)
         self.assertTrue(Ticket.objects.filter(pk=self.ticket_tech.pk).exists())
@@ -450,5 +460,326 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertEqual(len(data_delta['messages']), 1)
         self.assertEqual(data_delta['messages'][0]['content'], "Mesaj 3")
         self.assertEqual(data_delta['messages'][0]['message_id'], msg3.id)
+
+    # 11. GÜVENLİK VE YETKİLENDİRME (1.1 - 1.8) YENİ TESTLERİ
+    def test_ticket_form_xss_sanitization(self):
+        """TicketForm açıklama alanının zararlı script ve event handler etiketlerinden arındırıldığını test et."""
+        from tickets.forms import TicketForm
+        form_data = {
+            'title': 'XSS Güvenlik Testi',
+            'description': '<script>alert("hacked")</script><p>Normal metin</p><img src="x" onerror="alert(1)">',
+            'priority': 'medium',
+            'status': 'open',
+            'category': self.cat_tech.id,
+        }
+        form = TicketForm(data=form_data)
+        self.assertTrue(form.is_valid(), form.errors)
+        cleaned_desc = form.cleaned_data['description']
+        self.assertNotIn('<script>', cleaned_desc)
+        self.assertNotIn('alert(', cleaned_desc)
+        self.assertNotIn('onerror', cleaned_desc)
+        self.assertIn('<p>Normal metin</p>', cleaned_desc)
+
+    def test_ticket_delete_permissions(self):
+        """Kullanıcının kendi açık talebini silebilmesi, kapalı veya başkasının talebini silememesi test edilir."""
+        # John_doe kendi açık talebi
+        user_ticket = Ticket.objects.create(
+            title='John Kendi Talebi',
+            description='Açık durumdaki talep',
+            status='open',
+            created_by=self.normal_user,
+            category=self.cat_tech
+        )
+        self.client.login(username='john_doe', password='UserPass123!')
+        del_url = reverse('ticket_delete', kwargs={'pk': user_ticket.pk})
+
+        # Kendi açık talebini silebilir (302 redirect to ticket_list)
+        res = self.client.post(del_url)
+        self.assertEqual(res.status_code, 302)
+        self.assertFalse(Ticket.objects.filter(pk=user_ticket.pk).exists())
+
+        # Başkasının talebini silemez
+        other_ticket = Ticket.objects.create(
+            title='Tech Agent Talebi',
+            description='Teknik talep',
+            status='open',
+            created_by=self.tech_user,
+            category=self.cat_tech
+        )
+        res_fail = self.client.post(reverse('ticket_delete', kwargs={'pk': other_ticket.pk}))
+        self.assertEqual(res_fail.status_code, 302)
+        self.assertTrue(Ticket.objects.filter(pk=other_ticket.pk).exists())
+
+        # Kendi kapalı talebini silemez
+        closed_ticket = Ticket.objects.create(
+            title='John Kapalı Talebi',
+            description='Kapanmış talep',
+            status='closed',
+            created_by=self.normal_user,
+            category=self.cat_tech
+        )
+        res_closed = self.client.post(reverse('ticket_delete', kwargs={'pk': closed_ticket.pk}))
+        self.assertEqual(res_closed.status_code, 302)
+        self.assertTrue(Ticket.objects.filter(pk=closed_ticket.pk).exists())
+
+    def test_email_verification_failed_attempts_and_resend(self):
+        """E-posta doğrulama OTP kodu için 5 hatalı deneme sınırı ve yeni kod üretme test edilir."""
+        test_user = User.objects.create_user(username='otp_test_user', email='otp@test.com', password='TestPassword123!', is_active=False)
+        verification = EmailVerification.objects.create(user=test_user)
+        valid_code = verification.code
+
+        # Oturumda unverified_user_id tanımla
+        session = self.client.session
+        session['unverified_user_id'] = test_user.id
+        session.save()
+
+        verify_url = reverse('verify_email')
+
+        # 5 kez yanlış kod girilsin
+        for i in range(5):
+            self.client.post(verify_url, {'code': '000000'})
+        
+        verification.refresh_from_db()
+        self.assertEqual(verification.failed_attempts, 5)
+
+        # 6. denemede doğru kod bile girilse kilitlenmeli
+        self.client.post(verify_url, {'code': valid_code})
+        test_user.refresh_from_db()
+        self.assertFalse(test_user.is_active)
+
+        # Yeni kod talep et (action=resend)
+        res_resend = self.client.post(verify_url, {'action': 'resend'})
+        self.assertEqual(res_resend.status_code, 302)
+        verification.refresh_from_db()
+        self.assertEqual(verification.failed_attempts, 0)
+        self.assertNotEqual(verification.code, '000000')
+
+        # Şimdi yeni üretilen kod ile başarılı onaylama
+        res_success = self.client.post(verify_url, {'code': verification.code})
+        self.assertEqual(res_success.status_code, 302)
+        test_user.refresh_from_db()
+        self.assertTrue(test_user.is_active)
+
+    # 12. PERFORMANS VE VERİTABANI OPTİMİZASYONLARI (2.1 - 2.5) TESTLERİ
+    def test_dashboard_metrics_aggregation_and_sla_breach(self):
+        """Dashboard metriklerinin koşullu toplama ve veritabanı SLA sorgusu ile doğru hesaplandığını test et."""
+        self.client.login(username='superadmin', password='AdminPass123!')
+        res = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('total_tickets', res.context)
+        self.assertIn('sla_breached_count', res.context)
+        self.assertIn('sla_breached_tickets', res.context)
+        self.assertGreaterEqual(res.context['total_tickets'], 2)
+
+    def test_ticket_list_conditional_aggregation_counts(self):
+        """Talep listesindeki sayaçların tekil aggregate sorgusuyla doğru geldiğini test et."""
+        self.client.login(username='superadmin', password='AdminPass123!')
+        res = self.client.get(reverse('ticket_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('total_count', res.context)
+        self.assertIn('open_count', res.context)
+        self.assertGreaterEqual(res.context['total_count'], 2)
+
+    def test_knowledge_base_atomic_views_count_increment(self):
+        """Bilgi bankası makale sayacının F() ifadesiyle atomik arttığını test et."""
+        article = KnowledgeBaseArticle.objects.create(
+            title='Test Makalesi',
+            content='Test makale içeriği',
+            category=self.cat_tech,
+            is_published=True,
+            views_count=0
+        )
+        url = reverse('knowledge_base_detail', kwargs={'pk': article.pk})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        article.refresh_from_db()
+        self.assertEqual(article.views_count, 1)
+
+    def test_comment_with_update_text_not_hidden(self):
+        """Kullanıcının 'Güncelleme yapıldı' ile başlayan yorumunun ekranda görünür kaldığını test et."""
+        comment = TicketComment.objects.create(
+            ticket=self.ticket_tech,
+            author=self.normal_user,
+            content="Güncelleme yapıldı, kontrolleri sağlayabilirsiniz."
+        )
+        self.client.login(username='superadmin', password='AdminPass123!')
+        url = reverse('ticket_detail', kwargs={'pk': self.ticket_tech.pk})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "Güncelleme yapıldı, kontrolleri sağlayabilirsiniz.")
+
+    # 13. EKSİK KALAN MANTIKSAL ÖZELLİKLER (3.1 - 3.5) TESTLERİ
+    def test_customer_comment_notifies_assigned_agent(self):
+        """Müşteri yanıt verdiğinde talebe atanmış yetkiliye bildirim gittiğini test et (3.1)."""
+        # Talebi tech_user'a ata
+        self.ticket_tech.assigned_to = self.tech_user
+        self.ticket_tech.save(update_fields=['assigned_to'])
+
+        # Müşteri (john_doe) giriş yapıp yorum göndersin
+        self.client.login(username='john_doe', password='UserPass123!')
+        url = reverse('ticket_detail', kwargs={'pk': self.ticket_tech.pk})
+        res = self.client.post(url, {'content': 'Sorunum hala devam ediyor, kontrol edebilir misiniz?'})
+        self.assertEqual(res.status_code, 302)
+
+        # tech_user için bildirim oluştuğunu doğrula
+        notif = Notification.objects.filter(recipient=self.tech_user, ticket=self.ticket_tech).first()
+        self.assertIsNotNone(notif)
+        self.assertIn("Sorumlu olduğunuz", notif.message)
+        self.assertEqual(notif.actor, self.normal_user)
+
+    def test_ticket_assignment_notification_on_edit_and_bulk(self):
+        """Talebin yeni bir personele atanmasında o personele bildirim gittiğini test et (3.2)."""
+        # 1. ticket_edit ile atama
+        self.client.login(username='superadmin', password='AdminPass123!')
+        edit_url = reverse('ticket_edit', kwargs={'pk': self.ticket_fin.pk})
+        res = self.client.post(edit_url, {
+            'title': self.ticket_fin.title,
+            'description': self.ticket_fin.description,
+            'priority': self.ticket_fin.priority,
+            'status': self.ticket_fin.status,
+            'category': self.cat_fin.id,
+            'assigned_to': self.fin_user.id
+        })
+        self.assertEqual(res.status_code, 302)
+        notif_single = Notification.objects.filter(recipient=self.fin_user, ticket=self.ticket_fin).first()
+        self.assertIsNotNone(notif_single)
+        self.assertIn("talebi size atandı", notif_single.message)
+
+        # 2. bulk_ticket_action ile atama
+        bulk_url = reverse('bulk_ticket_action')
+        res_bulk = self.client.post(bulk_url, {
+            'bulk_action': 'assign',
+            'bulk_target_value': str(self.tech_user.id),
+            'selected_tickets': [self.ticket_fin.id]
+        })
+        self.assertEqual(res_bulk.status_code, 302)
+        notif_bulk = Notification.objects.filter(recipient=self.tech_user, ticket=self.ticket_fin).first()
+        self.assertIsNotNone(notif_bulk)
+        self.assertIn("talebi size atandı", notif_bulk.message)
+
+    def test_user_profile_first_and_last_name_update(self):
+        """Kullanıcı profilinde Ad ve Soyad alanlarının güncellenebildiğini test et (3.3)."""
+        self.client.login(username='john_doe', password='UserPass123!')
+        profile_url = reverse('profile')
+        post_data = {
+            'first_name': 'Ahmet',
+            'last_name': 'Yılmaz',
+            'username': 'john_doe',
+            'email': 'john@example.com',
+            'current_password': 'UserPass123!'
+        }
+        res = self.client.post(profile_url, post_data)
+        self.assertEqual(res.status_code, 302)
+        self.normal_user.refresh_from_db()
+        self.assertEqual(self.normal_user.first_name, 'Ahmet')
+        self.assertEqual(self.normal_user.last_name, 'Yılmaz')
+        self.assertEqual(self.normal_user.get_full_name(), 'Ahmet Yılmaz')
+
+    # 14. AŞAMA 4 TESTLERİ (4.1 & 4.2)
+    def test_totp_generation_and_2fa_login_flow(self):
+        """2FA TOTP üretimi, doğrulaması ve giriş güvenlik akışını test et (4.2.1)."""
+        secret = generate_totp_secret()
+        self.assertEqual(len(secret), 32)
+        valid_code = get_totp_token(secret)
+        self.assertTrue(verify_totp_token(secret, valid_code))
+        self.assertFalse(verify_totp_token(secret, "000000" if valid_code != "000000" else "111111"))
+
+        # Kullanıcıda 2FA'yı aktifleştir
+        self.tech_user.profile.totp_secret = secret
+        self.tech_user.profile.is_2fa_enabled = True
+        self.tech_user.profile.save()
+
+        # Giriş yapmayı dene -> 2FA ara sayfasına yönlenmeli
+        login_url = reverse('login')
+        res_login = self.client.post(login_url, {'username': 'tech_agent', 'password': 'TechPass123!'})
+        self.assertEqual(res_login.status_code, 302)
+        self.assertIn(reverse('verify_2fa'), res_login.url)
+
+        # Hatalı 2FA kodu gir
+        verify_url = reverse('verify_2fa')
+        res_fail = self.client.post(verify_url, {'token': '999999'})
+        self.assertEqual(res_fail.status_code, 200)
+
+        # Doğru 2FA kodu gir
+        current_token = get_totp_token(secret)
+        res_success = self.client.post(verify_url, {'token': current_token})
+        self.assertEqual(res_success.status_code, 302)
+
+    def test_magic_bytes_file_validation(self):
+        """Magic bytes denetimi ile sahte uzantılı dosyaların engellendiğini test et (4.2.2)."""
+        # 1. Gerçek PDF başlığı -> Geçmeli
+        valid_pdf = SimpleUploadedFile("belge.pdf", b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF", content_type="application/pdf")
+        validate_file_security(valid_pdf)
+
+        # 2. Sahte PDF (Metin/HTML içeren sahte PDF) -> ValidationError fırlatmalı
+        fake_pdf = SimpleUploadedFile("sahte.pdf", b"<html><body>Not a PDF</body></html>", content_type="application/pdf")
+        with self.assertRaises(ValidationError):
+            validate_file_security(fake_pdf)
+
+        # 3. Sahte Görsel (PNG uzantılı PHP scripti) -> ValidationError fırlatmalı
+        fake_png = SimpleUploadedFile("zararli.png", b"<?php echo 'malware'; ?>", content_type="image/png")
+        with self.assertRaises(ValidationError):
+            validate_file_security(fake_png)
+
+        # 4. Sahte ZIP arşivi -> ValidationError fırlatmalı
+        fake_zip = SimpleUploadedFile("arsiv.zip", b"Bu bir zip degildir.", content_type="application/zip")
+        with self.assertRaises(ValidationError):
+            validate_file_security(fake_zip)
+
+    def test_canned_responses_api_and_permissions(self):
+        """Hazır yanıt şablonlarının API üzerinden yetkili personellere sunulduğunu test et (4.1.3)."""
+        canned = CannedResponse.objects.create(
+            title="Standart Karşılama",
+            content="Merhaba, talebiniz tarafımıza ulaşmıştır.",
+            category=self.cat_tech,
+            created_by=self.super_user
+        )
+
+        api_url = reverse('canned_responses_api')
+
+        # Yetkisiz (standart kullanıcı) erişimi -> 403 Forbidden
+        self.client.login(username='john_doe', password='UserPass123!')
+        res_forbidden = self.client.get(api_url)
+        self.assertEqual(res_forbidden.status_code, 403)
+
+        # Yetkili personel erişimi -> 200 OK ve şablon listesi
+        self.client.login(username='tech_agent', password='TechPass123!')
+        res_ok = self.client.get(api_url)
+        self.assertEqual(res_ok.status_code, 200)
+        json_data = res_ok.json()
+        self.assertEqual(json_data['status'], 'success')
+        self.assertTrue(any(item['title'] == "Standart Karşılama" for item in json_data['canned_responses']))
+
+    def test_inbound_email_webhook_integration(self):
+        """E-posta üzerinden yanıtlama (Inbound Email Parsing) webhook akışını test et (4.1.4)."""
+        webhook_url = reverse('inbound_email_webhook')
+        secret = getattr(settings, 'INBOUND_EMAIL_WEBHOOK_SECRET', settings.SECRET_KEY[:32])
+
+        # 1. Yetkisiz istek (Secret yok) -> 403
+        res_unauthorized = self.client.post(webhook_url, {'subject': 'Re: Test'}, content_type='application/json')
+        self.assertEqual(res_unauthorized.status_code, 403)
+
+        # 2. Geçerli e-posta yanıtı
+        email_payload = {
+            'from': 'john_doe <john@example.com>',
+            'subject': f'Re: [Destek Talebi] #{self.ticket_tech.ticket_number} Talebinize Yeni Yanıt Geldi',
+            'text': 'Yazıcının güç kablosunu kontrol ettim ancak ışığı yanmıyor.\n\n> Eski mail alıntısı:\n> Talebiniz inceleniyor...'
+        }
+        res_success = self.client.post(
+            f"{webhook_url}?token={secret}",
+            email_payload,
+            content_type='application/json'
+        )
+        self.assertEqual(res_success.status_code, 200)
+        resp_json = res_success.json()
+        self.assertEqual(resp_json['status'], 'success')
+
+        # Veritabanında yorum oluştu mu kontrol et
+        new_comment = TicketComment.objects.filter(id=resp_json['comment_id']).first()
+        self.assertIsNotNone(new_comment)
+        self.assertEqual(new_comment.author, self.normal_user)
+        self.assertIn("güç kablosunu kontrol ettim", new_comment.content)
+        self.assertNotIn("Eski mail alıntısı", new_comment.content)
+
 
 
