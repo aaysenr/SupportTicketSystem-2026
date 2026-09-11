@@ -856,11 +856,20 @@ class SecurityAndRBACWorkflowTests(TestCase):
     def test_outgoing_webhook_dispatcher(self):
         """Acil durum dışa giden webhook tetikleyicisinin hatasız çalıştığını test et (4.2)."""
         from tickets.webhooks import send_outgoing_webhook
-        # Tanımlı webhook URL olmasa dahi güvenli şekilde çalışmalı ve hata fırlatmamalı
         try:
             send_outgoing_webhook(self.ticket_tech, event_type="urgent_ticket_created")
         except Exception as e:
             self.fail(f"send_outgoing_webhook beklenmeyen hata fırlattı: {e}")
+
+    def test_logout_user(self):
+        """Kullanıcının başarıyla çıkış yapıp login sayfasına yönlendirildiğini test et."""
+        self.client.login(username='john_doe', password='UserPass123!')
+        res = self.client.get(reverse('logout'))
+        self.assertEqual(res.status_code, 302)
+        self.assertRedirects(res, reverse('login'))
+        # Tekrar korumalı bir sayfaya erişmeye çalıştığında login'e yönlenmeli
+        res_profile = self.client.get(reverse('profile'))
+        self.assertEqual(res_profile.status_code, 302)
 
 
 

@@ -310,6 +310,11 @@ def logout_user(request):
     """
     Kullanıcı oturum kapatma görünümü.
     """
+    logout(request)
+    messages.info(request, "Başarıyla çıkış yaptınız.")
+    return redirect('login')
+
+
 @login_required
 def ticket_list(request):
     """
