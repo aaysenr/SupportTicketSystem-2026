@@ -921,6 +921,32 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertTrue(getattr(settings, 'SESSION_COOKIE_HTTPONLY', False))
         self.assertTrue(getattr(settings, 'SESSION_EXPIRE_AT_BROWSER_CLOSE', False))
 
+    # 6. PERFORMANS VE VERİTABANI İYİLEŞTİRMELERİ TESTLERİ (2.1 - 2.2)
+    def test_chat_message_compound_indexes(self):
+        """ChatMessage modelinde DM ve grup sohbetleri için bileşik indekslerin varlığını doğrula (2.1)."""
+        index_fields = [tuple(idx.fields) for idx in ChatMessage._meta.indexes]
+        self.assertIn(('sender', 'recipient', 'created_at'), index_fields)
+        self.assertIn(('group', 'created_at'), index_fields)
+
+    def test_sla_skips_turkish_public_holidays(self):
+        """SLA iş saati hesaplayıcısının Türkiye resmi tatillerini (Örn: 29 Ekim Cumhuriyet Bayramı) atladığını doğrula (2.2)."""
+        from datetime import datetime
+        from tickets.models import add_business_hours
+        import zoneinfo
+
+        tz = zoneinfo.ZoneInfo("Europe/Istanbul")
+        # 29 Ekim 2026 Perşembe (Resmi Tatil) saat 14:00'te açılan Acil (2 saat) talep:
+        # 29 Ekim tatil olduğu için bir sonraki iş günü olan 30 Ekim Cuma 09:00'a ertelenir ve 2 saat sonra 11:00 olur.
+        holiday_start = datetime(2026, 10, 29, 14, 0, tzinfo=tz)
+        deadline = add_business_hours(holiday_start, 2)
+
+        self.assertEqual(deadline.year, 2026)
+        self.assertEqual(deadline.month, 10)
+        self.assertEqual(deadline.day, 30)
+        self.assertEqual(deadline.hour, 11)
+        self.assertEqual(deadline.minute, 0)
+
+
 
 
 

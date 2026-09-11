@@ -40,10 +40,53 @@ class Category(models.Model):
         return self.name
 
 
+def is_holiday_or_weekend(dt):
+    """
+    Tarihin hafta sonu (Cumartesi, Pazar) veya resmi/dini bayram tatili
+    olup olmadığını kontrol eder.
+    """
+    # 1. Hafta sonu mu? (Cumartesi: 5, Pazar: 6)
+    if dt.weekday() in (5, 6):
+        return True
+
+    # 2. Türkiye Sabit Resmi Tatilleri (Ay, Gün)
+    fixed_holidays = {
+        (1, 1),    # Yılbaşı
+        (4, 23),   # Ulusal Egemenlik ve Çocuk Bayramı
+        (5, 1),    # Emek ve Dayanışma Günü
+        (5, 19),   # Atatürk'ü Anma, Gençlik ve Spor Bayramı
+        (7, 15),   # 15 Temmuz Demokrasi ve Milli Birlik Günü
+        (8, 30),   # Zafer Bayramı
+        (10, 29),  # Cumhuriyet Bayramı
+    }
+    if (dt.month, dt.day) in fixed_holidays:
+        return True
+
+    # 3. Dini Bayram Tatil Takvimi (2025 - 2028 Ramazan & Kurban Bayramları)
+    religious_holidays = {
+        # 2025
+        (2025, 3, 30), (2025, 3, 31), (2025, 4, 1),
+        (2025, 6, 6), (2025, 6, 7), (2025, 6, 8), (2025, 6, 9),
+        # 2026
+        (2026, 3, 20), (2026, 3, 21), (2026, 3, 22),
+        (2026, 5, 27), (2026, 5, 28), (2026, 5, 29), (2026, 5, 30),
+        # 2027
+        (2027, 3, 10), (2027, 3, 11), (2027, 3, 12),
+        (2027, 5, 17), (2027, 5, 18), (2027, 5, 19), (2027, 5, 20),
+        # 2028
+        (2028, 2, 27), (2028, 2, 28), (2028, 2, 29),
+        (2028, 5, 5), (2028, 5, 6), (2028, 5, 7), (2028, 5, 8),
+    }
+    if (dt.year, dt.month, dt.day) in religious_holidays:
+        return True
+
+    return False
+
+
 def add_business_hours(start_dt, hours):
     """
     Hafta içi 09:00 - 18:00 mesai saatlerine göre hedef teslim tarihini hesaplar.
-    Hafta sonlarını (Cumartesi, Pazar) ve mesai dışı saatleri atlar.
+    Hafta sonlarını (Cumartesi, Pazar) ve Türkiye resmi/dini tatil günlerini atlar.
     """
     from datetime import time, timedelta
     from django.utils import timezone
@@ -57,17 +100,17 @@ def add_business_hours(start_dt, hours):
     WORK_START = time(9, 0)
     WORK_END = time(18, 0)
 
-    # 1. Başlangıç anı hafta sonu ise ilk Pazartesi 09:00'a taşı
-    while current.weekday() in (5, 6):
+    # 1. Başlangıç anı tatil gününe denk geliyorsa ilk çalışma günü 09:00'a taşı
+    while is_holiday_or_weekend(current):
         current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
 
-    # 2. Hafta içi mesai öncesi ise 09:00'a taşı
+    # 2. Çalışma günü mesai öncesi ise 09:00'a taşı
     if current.time() < WORK_START:
         current = current.replace(hour=9, minute=0, second=0, microsecond=0)
-    # Hafta içi mesai sonrası ise ertesi iş günü 09:00'a taşı
+    # Çalışma günü mesai sonrası ise ertesi iş günü 09:00'a taşı
     elif current.time() >= WORK_END:
         current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
-        while current.weekday() in (5, 6):
+        while is_holiday_or_weekend(current):
             current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
 
     remaining_minutes = int(hours * 60)
@@ -82,7 +125,7 @@ def add_business_hours(start_dt, hours):
         else:
             remaining_minutes -= minutes_left_today
             current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
-            while current.weekday() in (5, 6):
+            while is_holiday_or_weekend(current):
                 current = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
 
     return current
@@ -379,6 +422,10 @@ class ChatMessage(models.Model):
         verbose_name = "Sohbet Mesajı"
         verbose_name_plural = "Sohbet Mesajları"
         ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['sender', 'recipient', 'created_at']),
+            models.Index(fields=['group', 'created_at']),
+        ]
 
     def __str__(self):
         return f"{self.sender.username}: {self.content[:30]}"
