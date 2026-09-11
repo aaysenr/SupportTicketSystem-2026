@@ -28,8 +28,7 @@ from tickets import views as ticket_views
 # GÜVENLİK KURALI: Admin paneline SADECE Süper Kullanıcılar (is_superuser=True) girebilsin!
 admin.site.has_permission = lambda request: request.user.is_active and request.user.is_superuser
 urlpatterns = [
-    # Kullanıcı /admin/ girdiğinde 404 almasın, doğrudan /super-admin/ adresine yönlensin
-    path('admin/', RedirectView.as_view(url='/super-admin/', permanent=False)),
+    # Gizli ve korumalı Django Yönetim Paneli (Sadece Süper Yöneticiler)
     path('super-admin/', admin.site.urls),
     
     # Hata Sayfaları Doğrudan Canlı Önizleme Rotaları (DEBUG açıkken de incelenebilir)

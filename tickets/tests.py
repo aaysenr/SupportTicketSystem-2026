@@ -1076,11 +1076,17 @@ class Stage4AndErrorPagesWorkflowTests(TestCase):
         )
         self.t2.tags.add(self.tag_sw)
 
-    def test_admin_redirect_to_superadmin(self):
-        """GET /admin/ adresinin 404 vermek yerine /super-admin/ adresine yönlendirdiğini doğrula."""
+    def test_admin_gives_404_and_hides_superadmin(self):
+        """GET /admin/ adresinin super-admin/ adresini ifşa etmeyip doğrudan 404.html döndürdüğünü doğrula."""
         response = self.client.get('/admin/')
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, '/super-admin/')
+        self.assertEqual(response.status_code, 404)
+        self.assertTemplateUsed(response, '404.html')
+
+    def test_unknown_url_renders_custom_404(self):
+        """Bilinmeyen bir URL girildiğinde sarı ekran yerine 404.html şablonunun döndüğünü doğrula."""
+        response = self.client.get('/uigu/')
+        self.assertEqual(response.status_code, 404)
+        self.assertTemplateUsed(response, '404.html')
 
     def test_custom_error_pages(self):
         """404, 403 ve 500 hata sayfalarının doğru HTTP durum kodu ve şablonla döndüğünü doğrula."""
