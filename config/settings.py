@@ -161,10 +161,8 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/6.1/howto/static-files/
-
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 
 # Email Konfigürasyonu (12-Factor: Canlıda SMTP, Geliştirmede Console)
@@ -214,4 +212,63 @@ MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_ROOT yüklenen dosyaların bilgisayarınızda saklanacağı fiziksel klasörü, 
 MEDIA_URL ise bu dosyalara tarayıcıdan hangi web adresiyle erişileceğini belirtir.
 '''
+
+
+# ==============================================================================
+# Üretim (Production) Güvenlik Başlıkları
+# ==============================================================================
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"
+    SECURE_HSTS_SECONDS = 31536000  # 1 Yıl
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+
+# ==============================================================================
+# Merkezi Loglama (Logging) Konfigürasyonu
+# ==============================================================================
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+        "file_errors": {
+            "level": "ERROR",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "django_errors.log",
+            "maxBytes": 5 * 1024 * 1024,  # 5 MB
+            "backupCount": 5,
+            "formatter": "standard",
+            "encoding": "utf-8",
+        },
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console", "file_errors"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "tickets": {
+            "handlers": ["console", "file_errors"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
 

@@ -861,124 +861,161 @@ document.addEventListener('DOMContentLoaded', function () {
     const ticketWsUrl = `${wsScheme}${window.location.host}/ws/ticket/${ticketId}/`;
     let ticketSocket = null;
     let typingTimer = null;
+    let reconnectTimeout = null;
 
-    try {
-        ticketSocket = new WebSocket(ticketWsUrl);
+    function initTicketWebSocket() {
+        try {
+            ticketSocket = new WebSocket(ticketWsUrl);
 
-        ticketSocket.onmessage = function (e) {
-            try {
-                const data = JSON.parse(e.data);
-                if (data.type === 'typing') {
-                    const indicator = document.getElementById('liveTypingIndicator');
-                    const typingText = document.getElementById('liveTypingText');
-                    if (indicator && typingText) {
-                        if (data.is_typing) {
-                            const sender = data.sender_name || 'Biri';
-                            typingText.textContent = `${sender} şu anda yazıyor...`;
-                            indicator.classList.remove('d-none');
-                            indicator.classList.add('d-flex');
-                        } else {
+            ticketSocket.onopen = function () {
+                if (reconnectTimeout) {
+                    clearTimeout(reconnectTimeout);
+                    reconnectTimeout = null;
+                }
+            };
+
+            ticketSocket.onmessage = function (e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'typing') {
+                        const indicator = document.getElementById('liveTypingIndicator');
+                        const typingText = document.getElementById('liveTypingText');
+                        if (indicator && typingText) {
+                            if (data.is_typing) {
+                                const sender = data.sender_name || 'Biri';
+                                typingText.textContent = `${sender} şu anda yazıyor...`;
+                                indicator.classList.remove('d-none');
+                                indicator.classList.add('d-flex');
+                            } else {
+                                indicator.classList.add('d-none');
+                                indicator.classList.remove('d-flex');
+                            }
+                        }
+                    } else if (data.type === 'comment') {
+                        // Sayfada bu yorum zaten var mı kontrol et
+                        const existingCard = document.getElementById(`comment-item-${data.comment_id}`);
+                        if (existingCard) return;
+
+                        // Henüz hiç yanıt yoksa placeholder'ı kaldır
+                        const noPlaceholder = document.getElementById('noCommentsPlaceholder');
+                        if (noPlaceholder) noPlaceholder.remove();
+
+                        // Yeni yorum kartını dinamik inşa et
+                        const card = document.createElement('div');
+                        card.id = `comment-item-${data.comment_id}`;
+                        card.className = `comment-card mb-4 p-3 rounded-3 border bg-body transition-all ${data.is_internal ? 'bg-warning-subtle border-warning' : ''}`;
+
+                        let badgesHtml = '';
+                        if (data.is_staff) {
+                            badgesHtml += '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle rounded-pill small">Yetkili</span>';
+                        }
+                        if (data.is_internal) {
+                            badgesHtml += '<span class="badge bg-warning text-dark rounded-pill ms-1"><i class="bi bi-lock-fill me-1"></i>Gizli İç Not</span>';
+                        }
+
+                        let attachmentHtml = '';
+                        if (data.attachment_url) {
+                            attachmentHtml = `
+                                <div class="mt-2 p-2 bg-body-tertiary rounded border small">
+                                    <a href="${data.attachment_url}" target="_blank" class="text-decoration-none fw-semibold">
+                                        <i class="bi bi-paperclip me-1 text-primary"></i>${data.attachment_name || 'Dosya Eki'}
+                                    </a>
+                                </div>
+                            `;
+                        }
+
+                        card.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                                <div class="d-flex align-items-center gap-2">
+                                    <strong class="text-body">
+                                        <i class="bi bi-person-circle me-1 text-primary"></i>${data.author_name}
+                                    </strong>
+                                    ${badgesHtml}
+                                </div>
+                                <small class="text-body-secondary"><i class="bi bi-clock me-1"></i>${data.created_at}</small>
+                            </div>
+                            <div class="comment-content text-body mb-2" style="font-size: 0.95rem; line-height: 1.6;">
+                                ${data.content}
+                            </div>
+                            ${attachmentHtml}
+                        `;
+
+                        const container = document.getElementById('commentsContainer');
+                        if (container) {
+                            container.appendChild(card);
+                            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+
+                        // Yorum sayacını güncelle
+                        const countEl = document.getElementById('total-comments-count');
+                        if (countEl) {
+                            const current = parseInt(countEl.textContent, 10);
+                            if (!isNaN(current)) countEl.textContent = current + 1;
+                        }
+
+                        // Yazıyor göstergesini gizle
+                        const indicator = document.getElementById('liveTypingIndicator');
+                        if (indicator) {
                             indicator.classList.add('d-none');
                             indicator.classList.remove('d-flex');
                         }
                     }
-                } else if (data.type === 'comment') {
-                    // Sayfada bu yorum zaten var mı kontrol et
-                    const existingCard = document.getElementById(`comment-item-${data.comment_id}`);
-                    if (existingCard) return;
-
-                    // Henüz hiç yanıt yoksa placeholder'ı kaldır
-                    const noPlaceholder = document.getElementById('noCommentsPlaceholder');
-                    if (noPlaceholder) noPlaceholder.remove();
-
-                    // Yeni yorum kartını dinamik inşa et
-                    const card = document.createElement('div');
-                    card.id = `comment-item-${data.comment_id}`;
-                    card.className = `comment-card mb-4 p-3 rounded-3 border bg-body transition-all ${data.is_internal ? 'bg-warning-subtle border-warning' : ''}`;
-
-                    let badgesHtml = '';
-                    if (data.is_staff) {
-                        badgesHtml += '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle rounded-pill small">Yetkili</span>';
-                    }
-                    if (data.is_internal) {
-                        badgesHtml += '<span class="badge bg-warning text-dark rounded-pill ms-1"><i class="bi bi-lock-fill me-1"></i>Gizli İç Not</span>';
-                    }
-
-                    let attachmentHtml = '';
-                    if (data.attachment_url) {
-                        attachmentHtml = `
-                            <div class="mt-2 p-2 bg-body-tertiary rounded border small">
-                                <a href="${data.attachment_url}" target="_blank" class="text-decoration-none fw-semibold">
-                                    <i class="bi bi-paperclip me-1 text-primary"></i>${data.attachment_name || 'Dosya Eki'}
-                                </a>
-                            </div>
-                        `;
-                    }
-
-                    card.innerHTML = `
-                        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                            <div class="d-flex align-items-center gap-2">
-                                <strong class="text-body">
-                                    <i class="bi bi-person-circle me-1 text-primary"></i>${data.author_name}
-                                </strong>
-                                ${badgesHtml}
-                            </div>
-                            <small class="text-body-secondary"><i class="bi bi-clock me-1"></i>${data.created_at}</small>
-                        </div>
-                        <div class="comment-content text-body mb-2" style="font-size: 0.95rem; line-height: 1.6;">
-                            ${data.content}
-                        </div>
-                        ${attachmentHtml}
-                    `;
-
-                    const container = document.getElementById('commentsContainer');
-                    if (container) {
-                        container.appendChild(card);
-                        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-
-                    // Yorum sayacını güncelle
-                    const countEl = document.getElementById('total-comments-count');
-                    if (countEl) {
-                        const current = parseInt(countEl.textContent, 10);
-                        if (!isNaN(current)) countEl.textContent = current + 1;
-                    }
-
-                    // Yazıyor göstergesini gizle
-                    const indicator = document.getElementById('liveTypingIndicator');
-                    if (indicator) {
-                        indicator.classList.add('d-none');
-                        indicator.classList.remove('d-flex');
-                    }
+                } catch (err) {
+                    console.error('Ticket WS mesajı okunamadı:', err);
                 }
-            } catch (err) {
-                console.error('Ticket WS mesajı okunamadı:', err);
+            };
+
+            ticketSocket.onclose = function () {
+                // Bağlantı koptuğunda 3 saniye sonra otomatik yeniden bağlan
+                if (!reconnectTimeout) {
+                    reconnectTimeout = setTimeout(function () {
+                        reconnectTimeout = null;
+                        initTicketWebSocket();
+                    }, 3000);
+                }
+            };
+
+            ticketSocket.onerror = function () {
+                if (!reconnectTimeout) {
+                    reconnectTimeout = setTimeout(function () {
+                        reconnectTimeout = null;
+                        initTicketWebSocket();
+                    }, 3000);
+                }
+            };
+        } catch (e) {
+            console.warn('Talep WebSocket başlatılamadı, 3 sn sonra tekrar denenecek:', e);
+            if (!reconnectTimeout) {
+                reconnectTimeout = setTimeout(function () {
+                    reconnectTimeout = null;
+                    initTicketWebSocket();
+                }, 3000);
             }
-        };
-
-        // Yazarken WebSocket üzerinden typing sinyali ilet
-        if (contentTextarea) {
-            contentTextarea.addEventListener('input', function () {
-                if (ticketSocket && ticketSocket.readyState === WebSocket.OPEN) {
-                    ticketSocket.send(JSON.stringify({
-                        type: 'typing',
-                        is_typing: true
-                    }));
-
-                    clearTimeout(typingTimer);
-                    typingTimer = setTimeout(function () {
-                        if (ticketSocket && ticketSocket.readyState === WebSocket.OPEN) {
-                            ticketSocket.send(JSON.stringify({
-                                type: 'typing',
-                                is_typing: false
-                            }));
-                        }
-                    }, 2500);
-                }
-            });
         }
-    } catch (e) {
-        console.warn('Talep WebSocket başlatılamadı:', e);
+    }
+
+    initTicketWebSocket();
+
+    // Yazarken WebSocket üzerinden typing sinyali ilet
+    if (contentTextarea) {
+        contentTextarea.addEventListener('input', function () {
+            if (ticketSocket && ticketSocket.readyState === WebSocket.OPEN) {
+                ticketSocket.send(JSON.stringify({
+                    type: 'typing',
+                    is_typing: true
+                }));
+
+                clearTimeout(typingTimer);
+                typingTimer = setTimeout(function () {
+                    if (ticketSocket && ticketSocket.readyState === WebSocket.OPEN) {
+                        ticketSocket.send(JSON.stringify({
+                            type: 'typing',
+                            is_typing: false
+                        }));
+                    }
+                }, 2500);
+            }
+        });
     }
 });
 </script>
