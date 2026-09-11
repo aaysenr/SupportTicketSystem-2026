@@ -17,12 +17,13 @@ from django.contrib import messages
 from django.db.models import Q, Count, Avg, F
 from django.core.paginator import Paginator
 from django.core.mail import send_mail
+from datetime import datetime, date
 from django.utils import timezone
 
 from .models import (
     Ticket, TicketComment, Category, EmailVerification, TicketActivityLog,
     Notification, ChatGroup, ChatMessage, UserProfile, KnowledgeBaseArticle,
-    TicketRating, CannedResponse
+    TicketRating, CannedResponse, TicketTag
 )
 from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm
 from .totp import (
@@ -122,6 +123,36 @@ def admin_dashboard_view(request):
         'Acil': metrics['priority_urgent'],
     }
 
+    # 6. Aylık CSAT Memnuniyet Trendi (Son 6 Ay)
+    csat_trend_labels = []
+    csat_trend_values = []
+    month_names_tr = {
+        1: 'Oca', 2: 'Şub', 3: 'Mar', 4: 'Nis', 5: 'May', 6: 'Haz',
+        7: 'Tem', 8: 'Ağu', 9: 'Eyl', 10: 'Eki', 11: 'Kas', 12: 'Ara'
+    }
+    today = timezone.now().date()
+    for i in range(5, -1, -1):
+        year = today.year
+        month = today.month - i
+        while month <= 0:
+            month += 12
+            year -= 1
+        m_start = timezone.make_aware(datetime(year, month, 1, 0, 0, 0))
+        if month == 12:
+            m_end = timezone.make_aware(datetime(year + 1, 1, 1, 0, 0, 0))
+        else:
+            m_end = timezone.make_aware(datetime(year, month + 1, 1, 0, 0, 0))
+
+        m_stat = TicketRating.objects.filter(
+            ticket__in=base_qs,
+            created_at__gte=m_start,
+            created_at__lt=m_end
+        ).aggregate(avg=Avg('score'))
+
+        val = round(m_stat['avg'], 2) if m_stat['avg'] is not None else 0.0
+        csat_trend_labels.append(f"{month_names_tr.get(month, '')} {year}")
+        csat_trend_values.append(val)
+
     context = {
         'total_tickets': total_tickets,
         'open_tickets': open_tickets,
@@ -145,6 +176,8 @@ def admin_dashboard_view(request):
         'category_counts_json': json.dumps(category_counts),
         'priority_labels_json': json.dumps(list(priority_data.keys())),
         'priority_counts_json': json.dumps(list(priority_data.values())),
+        'csat_trend_labels_json': json.dumps(csat_trend_labels),
+        'csat_trend_values_json': json.dumps(csat_trend_values),
     }
 
     return render(request, 'tickets/dashboard.html', context)
@@ -366,11 +399,12 @@ def ticket_list(request):
     urgent_count = counts['urgent']
 
     # 3. URL Arama ve Filtreleme İşlemleri
-    tickets = base_tickets.annotate(comment_count=Count('comments'))
+    tickets = base_tickets.annotate(comment_count=Count('comments')).select_related('created_by', 'category', 'assigned_to').prefetch_related('comments', 'tags')
     
     search_query = request.GET.get('q', '').strip()
     selected_status = request.GET.get('status', '').strip()
     selected_priority = request.GET.get('priority', '').strip()
+    selected_tag = request.GET.get('tag', '').strip()
     selected_sort = request.GET.get('sort', 'newest').strip()
     selected_solution = request.GET.get('solution', 'all').strip()
 
@@ -384,6 +418,9 @@ def ticket_list(request):
 
     if selected_priority:
         tickets = tickets.filter(priority=selected_priority)
+
+    if selected_tag:
+        tickets = tickets.filter(Q(tags__slug=selected_tag) | Q(tags__name=selected_tag)).distinct()
 
     if selected_solution == 'solved':
         tickets = tickets.filter(Q(status='resolved') | Q(comments__is_solution=True)).distinct()
@@ -407,6 +444,7 @@ def ticket_list(request):
         'search_query': search_query,
         'selected_status': selected_status,
         'selected_priority': selected_priority,
+        'selected_tag': selected_tag,
         'selected_sort': selected_sort,
         'selected_solution': selected_solution,
         'filter_mine': filter_mine,
@@ -420,6 +458,8 @@ def ticket_list(request):
         'user_profile': profile,
         'is_superadmin': is_superadmin,
         'categories': Category.objects.all(),
+        'all_tags': TicketTag.objects.all(),
+        'tags': TicketTag.objects.all(),
         'staff_users': User.objects.filter(is_staff=True).order_by('username'),
     }
 
@@ -1523,20 +1563,11 @@ def download_comment_attachment(request, comment_id):
 import csv
 from django.http import HttpResponse
 
-@login_required
-def export_tickets_csv(request):
-    """
-    Destek taleplerini Excel uyumlu CSV (UTF-8 BOM ve ';' ayracı) formatında dışa aktarır.
-    Aktif filtreleri ve RBAC departman yetkilendirmesini uygular.
-    """
-    if not request.user.is_staff:
-        messages.error(request, "Rapor dışa aktarma yetkiniz bulunmamaktadır!")
-        return redirect('ticket_list')
-
+def _get_filtered_tickets_qs(request):
+    """Excel ve CSV export için ortak filtrelenmiş talep sorgusunu üretir."""
     profile = getattr(request.user, 'profile', None)
     is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
 
-    # 1. RBAC Kapsamı
     if is_superadmin:
         base_qs = Ticket.objects.all()
     elif profile and profile.assigned_categories.exists():
@@ -1547,11 +1578,11 @@ def export_tickets_csv(request):
     else:
         base_qs = Ticket.objects.all()
 
-    # 2. Filtre Parametreleri
     q = request.GET.get('q', '').strip()
     status = request.GET.get('status', '').strip()
     priority = request.GET.get('priority', '').strip()
     category_id = request.GET.get('category', '').strip()
+    tag = request.GET.get('tag', '').strip()
     mine = request.GET.get('mine') == '1'
 
     tickets = base_qs
@@ -1563,29 +1594,45 @@ def export_tickets_csv(request):
         tickets = tickets.filter(priority=priority)
     if category_id:
         tickets = tickets.filter(category_id=category_id)
+    if tag:
+        tickets = tickets.filter(Q(tags__slug=tag) | Q(tags__name=tag)).distinct()
     if mine:
         tickets = tickets.filter(created_by=request.user)
 
-    tickets = tickets.select_related('created_by', 'category', 'assigned_to').prefetch_related('comments').order_by('-created_at')
+    return tickets.select_related('created_by', 'category', 'assigned_to').prefetch_related('comments', 'tags').order_by('-created_at')
 
-    # 3. CSV Yanıtı (Windows Excel Türkçe karakter uyumu için utf-8-sig ve ';' ayracı)
+
+@login_required
+def export_tickets_csv(request):
+    """
+    Destek taleplerini Excel uyumlu CSV (UTF-8 BOM ve ';' ayracı) formatında dışa aktarır.
+    Aktif filtreleri ve RBAC departman yetkilendirmesini uygular.
+    """
+    if not request.user.is_staff:
+        messages.error(request, "Rapor dışa aktarma yetkiniz bulunmamaktadır!")
+        return redirect('ticket_list')
+
+    tickets = _get_filtered_tickets_qs(request)
+
     response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
     filename = f"destek_talepleri_raporu_{timezone.now().strftime('%Y%m%d_%H%M')}.csv"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
     writer = csv.writer(response, delimiter=';')
     writer.writerow([
-        'Talep No', 'Başlık', 'Kategori', 'Öncelik', 'Durum',
+        'Talep No', 'Başlık', 'Kategori', 'Etiketler', 'Öncelik', 'Durum',
         'Oluşturan', 'Atanan Yönetici', 'Gizlilik', 'Oluşturulma Tarihi',
         'Son Güncelleme', 'İlk Yanıt Tarihi', 'SLA Durumu', 'Yorum Sayısı'
     ])
 
     for t in tickets:
         sla_text = "SLA Aşıldı" if t.is_sla_breached else ("İlk Yanıt Verildi" if t.first_response_at else "Zamanında Devam Ediyor")
+        tags_str = ", ".join([f"#{tg.name}" for tg in t.tags.all()]) if hasattr(t, 'tags') else ""
         writer.writerow([
             t.ticket_number,
             t.title,
             t.category.name if t.category else "Kategorisiz",
+            tags_str,
             t.get_priority_display(),
             t.get_status_display(),
             t.created_by.username,
@@ -1598,6 +1645,86 @@ def export_tickets_csv(request):
             t.comments.count()
         ])
 
+    return response
+
+
+@login_required
+def export_tickets_excel(request):
+    """
+    Destek taleplerini biçimlendirilmiş Microsoft Excel (.xlsx) formatında dışa aktarır.
+    openpyxl kütüphanesini kullanarak kurumsal renkler, otomatik sütun genişlikleri
+    ve başlık filtreleme desteği sunar.
+    """
+    if not request.user.is_staff:
+        messages.error(request, "Rapor dışa aktarma yetkiniz bulunmamaktadır!")
+        return redirect('ticket_list')
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Destek Talepleri"
+
+    headers = [
+        'Talep No', 'Başlık', 'Kategori', 'Etiketler', 'Öncelik', 'Durum',
+        'Oluşturan', 'Atanan Yönetici', 'Gizlilik', 'Oluşturulma Tarihi',
+        'Son Güncelleme', 'İlk Yanıt Tarihi', 'SLA Durumu', 'Yorum Sayısı'
+    ]
+    ws.append(headers)
+
+    header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+    header_fill = PatternFill(start_color='1D4ED8', end_color='1D4ED8', fill_type='solid')
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+
+    tickets = _get_filtered_tickets_qs(request)
+
+    for t in tickets:
+        sla_text = "SLA Aşıldı" if t.is_sla_breached else ("İlk Yanıt Verildi" if t.first_response_at else "Zamanında Devam Ediyor")
+        tags_str = ", ".join([f"#{tg.name}" for tg in t.tags.all()]) if hasattr(t, 'tags') else ""
+        row = [
+            t.ticket_number,
+            t.title,
+            t.category.name if t.category else "Kategorisiz",
+            tags_str,
+            t.get_priority_display(),
+            t.get_status_display(),
+            t.created_by.username,
+            t.assigned_to.username if t.assigned_to else "Atanmadı",
+            "Herkese Açık" if t.is_public else "Özel / Gizli",
+            t.created_at.strftime('%d.%m.%Y %H:%M') if t.created_at else "",
+            t.updated_at.strftime('%d.%m.%Y %H:%M') if t.updated_at else "",
+            t.first_response_at.strftime('%d.%m.%Y %H:%M') if t.first_response_at else "Henüz Yanıtlanmadı",
+            sla_text,
+            t.comments.count()
+        ]
+        ws.append(row)
+
+    # Otomatik sütun genişliği hesaplama
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    filename = f"destek_talepleri_raporu_{timezone.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    wb.save(response)
     return response
 
 
@@ -1709,10 +1836,107 @@ def bulk_ticket_action(request):
             messages.success(request, f"{updated_count} adet talebin kategorisi güncellendi.")
         except (ValueError, Category.DoesNotExist):
             messages.error(request, "Seçilen kategori bulunamadı.")
+
+    elif action == 'merge':
+        if tickets.count() < 2:
+            messages.warning(request, "Birleştirme işlemi için en az 2 adet talep seçmelisiniz.")
+            return redirect('ticket_list')
+
+        tickets_list = list(tickets.order_by('created_at'))
+        primary_ticket = tickets_list[0]
+        merged_count = 0
+
+        for sec in tickets_list[1:]:
+            sec.merged_into = primary_ticket
+            sec.status = 'closed'
+            sec.save(update_fields=['merged_into', 'status', 'updated_at'])
+            for tg in sec.tags.all():
+                primary_ticket.tags.add(tg)
+            TicketComment.objects.create(
+                ticket=sec,
+                author=request.user,
+                content=f"🔒 Bu talep, #{primary_ticket.ticket_number} numaralı ana talep ile birleştirilerek kapatılmıştır."
+            )
+            TicketComment.objects.create(
+                ticket=primary_ticket,
+                author=request.user,
+                content=f"🔗 #{sec.ticket_number} ('{sec.title}') mükerrer talebi bu talep ile birleştirildi.",
+                is_internal=True
+            )
+            TicketActivityLog.objects.create(
+                ticket=primary_ticket,
+                actor=request.user,
+                action=f"Toplu Birleştirme: #{sec.ticket_number} talebi bu talep ile birleştirildi."
+            )
+            merged_count += 1
+
+        messages.success(request, f"{merged_count} adet talep başarıyla #{primary_ticket.ticket_number} ana talebine birleştirildi.")
+        return redirect('ticket_detail', pk=primary_ticket.pk)
+
     else:
         messages.warning(request, "Geçersiz işlem seçildi.")
 
     return redirect('ticket_list')
+
+
+@login_required
+@require_POST
+def merge_tickets_view(request):
+    """
+    Talep detay sayfasından iki talebi birleştirir (Merge Tickets).
+    İkincil talep kapatılır ve içeriği/geçmişi ana talebe aktarılır.
+    Yalnızca yetkili personel (is_staff) yapabilir.
+    """
+    if not request.user.is_staff:
+        messages.error(request, "Talep birleştirme yetkiniz bulunmamaktadır.")
+        return redirect('ticket_list')
+
+    primary_id = request.POST.get('primary_ticket_id')
+    secondary_id = request.POST.get('secondary_ticket_id')
+
+    if not primary_id or not secondary_id:
+        messages.error(request, "Birleştirme için iki talep de belirlenmelidir.")
+        return redirect('ticket_list')
+
+    if str(primary_id) == str(secondary_id):
+        messages.error(request, "Bir talep kendisiyle birleştirilemez.")
+        return redirect('ticket_detail', pk=primary_id)
+
+    primary_ticket = get_object_or_404(Ticket, id=primary_id)
+    secondary_ticket = get_object_or_404(Ticket, id=secondary_id)
+
+    secondary_ticket.merged_into = primary_ticket
+    secondary_ticket.status = 'closed'
+    secondary_ticket.save(update_fields=['merged_into', 'status', 'updated_at'])
+
+    for tg in secondary_ticket.tags.all():
+        primary_ticket.tags.add(tg)
+
+    TicketComment.objects.create(
+        ticket=secondary_ticket,
+        author=request.user,
+        content=f"🔒 Bu talep, #{primary_ticket.ticket_number} ('{primary_ticket.title}') numaralı ana talep ile birleştirilerek kapatılmıştır."
+    )
+    TicketComment.objects.create(
+        ticket=primary_ticket,
+        author=request.user,
+        content=f"🔗 #{secondary_ticket.ticket_number} ('{secondary_ticket.title}') mükerrer talebi bu talep ile birleştirildi.",
+        is_internal=True
+    )
+    TicketActivityLog.objects.create(
+        ticket=primary_ticket,
+        actor=request.user,
+        action=f"#{secondary_ticket.ticket_number} talebi bu talep ile birleştirildi."
+    )
+    TicketActivityLog.objects.create(
+        ticket=secondary_ticket,
+        actor=request.user,
+        action=f"Bu talep #{primary_ticket.ticket_number} ana talebiyle birleştirildi ve kapatıldı."
+    )
+
+    messages.success(request, f"#{secondary_ticket.ticket_number} talebi başarıyla #{primary_ticket.ticket_number} ana talebine birleştirildi.")
+    return redirect('ticket_detail', pk=primary_ticket.pk)
+
 
 
 # ==========================================
@@ -2070,5 +2294,23 @@ def ai_summarize_ticket_api(request, pk):
         'ticket_number': ticket.ticket_number,
         'summary': summary
     })
+
+
+# --- ÖZEL HATA SAYFALARI (404, 403, 500) GÖRÜNÜMLERİ ---
+
+def custom_404_view(request, exception=None):
+    """Özel 404 Sayfa Bulunamadı hata ekranı."""
+    return render(request, '404.html', status=404)
+
+
+def custom_403_view(request, exception=None):
+    """Özel 403 Erişim Yetkisi Yok hata ekranı."""
+    return render(request, '403.html', status=403)
+
+
+def custom_500_view(request):
+    """Özel 500 Sunucu Hatası ekranı."""
+    return render(request, '500.html', status=500)
+
 
 

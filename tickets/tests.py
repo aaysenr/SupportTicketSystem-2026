@@ -1045,6 +1045,158 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertFalse(default_storage.exists(att_name))
 
 
+class Stage4AndErrorPagesWorkflowTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.admin_user = User.objects.create_superuser('admin_stage4', 'admin4@example.com', 'AdminPass123!')
+        self.staff_user = User.objects.create_user('staff_stage4', 'staff4@example.com', 'StaffPass123!')
+        self.staff_user.is_staff = True
+        self.staff_user.save()
+        self.user = User.objects.create_user('user_stage4', 'user4@example.com', 'UserPass123!')
+
+        from tickets.models import TicketTag
+        self.tag_hw = TicketTag.objects.create(name='Donanım', slug='donanim', color='#EF4444')
+        self.tag_sw = TicketTag.objects.create(name='Yazılım', slug='yazilim', color='#3B82F6')
+
+        self.t1 = Ticket.objects.create(
+            title='Ana Bilgisayar Arızası',
+            description='Bilgisayar açılmıyor.',
+            created_by=self.user,
+            priority='urgent',
+            status='open'
+        )
+        self.t1.tags.add(self.tag_hw)
+
+        self.t2 = Ticket.objects.create(
+            title='Mükerrer Bilgisayar Arızası',
+            description='Aynı bilgisayar halen açılmıyor.',
+            created_by=self.user,
+            priority='high',
+            status='open'
+        )
+        self.t2.tags.add(self.tag_sw)
+
+    def test_admin_redirect_to_superadmin(self):
+        """GET /admin/ adresinin 404 vermek yerine /super-admin/ adresine yönlendirdiğini doğrula."""
+        response = self.client.get('/admin/')
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/super-admin/')
+
+    def test_custom_error_pages(self):
+        """404, 403 ve 500 hata sayfalarının doğru HTTP durum kodu ve şablonla döndüğünü doğrula."""
+        res_404 = self.client.get('/404/')
+        self.assertEqual(res_404.status_code, 404)
+        self.assertTemplateUsed(res_404, '404.html')
+
+        res_403 = self.client.get('/403/')
+        self.assertEqual(res_403.status_code, 403)
+        self.assertTemplateUsed(res_403, '403.html')
+
+        res_500 = self.client.get('/500/')
+        self.assertEqual(res_500.status_code, 500)
+        self.assertTemplateUsed(res_500, '500.html')
+
+    def test_export_tickets_excel(self):
+        """Yetkili personelin .xlsx formatında Excel raporu indirebildiğini doğrula (4.1)."""
+        # Normal kullanıcı erişememeli
+        self.client.login(username='user_stage4', password='UserPass123!')
+        res_user = self.client.get(reverse('export_tickets_excel'))
+        self.assertEqual(res_user.status_code, 302)
+
+        # Personel Excel dosyasını indirebilmeli
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+        res_staff = self.client.get(reverse('export_tickets_excel'))
+        self.assertEqual(res_staff.status_code, 200)
+        self.assertEqual(
+            res_staff['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        self.assertIn('attachment; filename="destek_talepleri_raporu_', res_staff['Content-Disposition'])
+
+    def test_ticket_tags_and_filtering(self):
+        """Etiketlerin talebe eklenebildiğini ve filtrelemede çalıştığını doğrula (4.2)."""
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+        
+        # Donanım etiketi filtresi
+        res_hw = self.client.get(reverse('ticket_list') + f'?tag={self.tag_hw.slug}')
+        self.assertEqual(res_hw.status_code, 200)
+        tickets_hw = res_hw.context['tickets'].object_list
+        self.assertIn(self.t1, tickets_hw)
+        self.assertNotIn(self.t2, tickets_hw)
+
+        # Yazılım etiketi filtresi
+        res_sw = self.client.get(reverse('ticket_list') + f'?tag={self.tag_sw.slug}')
+        self.assertEqual(res_sw.status_code, 200)
+        tickets_sw = res_sw.context['tickets'].object_list
+        self.assertIn(self.t2, tickets_sw)
+        self.assertNotIn(self.t1, tickets_sw)
+
+    def test_merge_tickets_view(self):
+        """Taleplerin tekil olarak birleştirilebildiğini doğrula (4.3)."""
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+        merge_url = reverse('merge_tickets')
+        
+        res = self.client.post(merge_url, {
+            'primary_ticket_id': self.t1.id,
+            'secondary_ticket_id': self.t2.id,
+        })
+        self.assertRedirects(res, reverse('ticket_detail', kwargs={'pk': self.t1.id}))
+
+        self.t2.refresh_from_db()
+        self.t1.refresh_from_db()
+
+        self.assertEqual(self.t2.merged_into, self.t1)
+        self.assertEqual(self.t2.status, 'closed')
+        # İkincil talebin etiketi ana talebe kopyalanmalı
+        self.assertIn(self.tag_sw, self.t1.tags.all())
+
+        # Yorum ve aktivite kayıtları kontrolü
+        self.assertTrue(TicketComment.objects.filter(ticket=self.t2, content__contains='kapatılmıştır').exists())
+        self.assertTrue(TicketComment.objects.filter(ticket=self.t1, is_internal=True).exists())
+
+    def test_bulk_merge_action(self):
+        """Toplu işlemle taleplerin en eski talep altında birleştirildiğini doğrula (4.3)."""
+        t3 = Ticket.objects.create(
+            title='3. Mükerrer Talep',
+            description='Açıklama',
+            created_by=self.user,
+            status='open'
+        )
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+        bulk_url = reverse('bulk_ticket_action')
+
+        res = self.client.post(bulk_url, {
+            'selected_tickets': [self.t1.id, self.t2.id, t3.id],
+            'bulk_action': 'merge',
+            'bulk_target_value': 'merge'
+        })
+        self.assertRedirects(res, reverse('ticket_detail', kwargs={'pk': self.t1.id}))
+
+        self.t2.refresh_from_db()
+        t3.refresh_from_db()
+        self.assertEqual(self.t2.merged_into, self.t1)
+        self.assertEqual(self.t2.status, 'closed')
+        self.assertEqual(t3.merged_into, self.t1)
+        self.assertEqual(t3.status, 'closed')
+
+    def test_csat_trend_calculation_in_dashboard(self):
+        """Dashboard'da aylık CSAT memnuniyet trend verilerinin hesaplandığını doğrula (4.4)."""
+        TicketRating.objects.create(ticket=self.t1, user=self.user, score=5, feedback="Mükemmel!")
+        TicketRating.objects.create(ticket=self.t2, user=self.user, score=4, feedback="İyi.")
+
+        self.client.login(username='admin_stage4', password='AdminPass123!')
+        res = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(res.status_code, 200)
+
+        self.assertIn('csat_trend_labels_json', res.context)
+        self.assertIn('csat_trend_values_json', res.context)
+        import json
+        values = json.loads(res.context['csat_trend_values_json'])
+        # Son ayın ortalaması (5 + 4) / 2 = 4.5 olmalı
+        self.assertAlmostEqual(values[-1], 4.5, places=1)
+
+
+
 
 
 

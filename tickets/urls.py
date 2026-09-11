@@ -83,7 +83,9 @@ urlpatterns = [
 
     # Raporlama ve Dışa Aktarma (Excel / CSV & PDF)
     path('export/tickets/', views.export_tickets_csv, name='export_tickets_csv'),
+    path('export/tickets/excel/', views.export_tickets_excel, name='export_tickets_excel'),
     path('ticket/<int:pk>/pdf/', views.export_ticket_pdf, name='export_ticket_pdf'),
+    path('ticket/merge/', views.merge_tickets_view, name='merge_tickets'),
 
     # Yapay Zekâ Destekli Talep Asistanı (AI Copilot) API'leri
     path('api/ai/suggest-meta/', views.ai_suggest_meta_api, name='ai_suggest_meta_api'),

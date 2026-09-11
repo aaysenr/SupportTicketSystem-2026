@@ -31,6 +31,11 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
  
    
     
+        if 'tags' in self.fields:
+            self.fields['tags'].widget = forms.CheckboxSelectMultiple(attrs={'class': 'form-check-input'})
+            self.fields['tags'].required = False
+            self.fields['tags'].label = "Etiketler"
+
     def clean_attachment(self):
         attachment = self.cleaned_data.get('attachment')
         if attachment:
@@ -52,11 +57,9 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
             )
         return description
 
-    class Meta: # Django'ya bu formun hangi modeli kullanacağını ve hangi alanları göstereceğini bildirir
-        model = Ticket # Formun Ticket veritabanı tablosundan türetileceğini belirtir.
-        # Formda kullanıcının doldurmasını istediğimiz alanlar:
-        
-        fields = ['title', 'category', 'priority', 'status', 'assigned_to', 'is_public', 'description', 'attachment']
+    class Meta:
+        model = Ticket
+        fields = ['title', 'category', 'priority', 'status', 'assigned_to', 'tags', 'is_public', 'description', 'attachment']
 
         # Form elemanlarına Bootstrap CSS sınıfları ve etiketler ekliyoruz (Widgets)
         widgets = {

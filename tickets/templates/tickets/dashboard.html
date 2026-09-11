@@ -19,9 +19,16 @@
             </div>
         </div>
         <div class="d-flex gap-2 flex-wrap align-items-center">
-            <a href="{% url 'export_tickets_csv' %}" class="btn btn-success btn-sm px-3 py-2 fw-semibold shadow-xs">
-                <i class="bi bi-file-earmark-spreadsheet-fill me-1"></i> Excel / CSV Rapor İndir
-            </a>
+            <div class="dropdown">
+                <button class="btn btn-success btn-sm px-3 py-2 fw-semibold shadow-xs dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-file-earmark-spreadsheet-fill me-1"></i> Rapor İndir
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow border-0">
+                    <li><h6 class="dropdown-header text-uppercase small fw-bold">Dışa Aktarma Formatı</h6></li>
+                    <li><a class="dropdown-item py-2" href="{% url 'export_tickets_excel' %}"><i class="bi bi-file-earmark-excel-fill text-success me-2"></i>Excel Raporu (.xlsx)</a></li>
+                    <li><a class="dropdown-item py-2" href="{% url 'export_tickets_csv' %}"><i class="bi bi-file-earmark-text-fill text-primary me-2"></i>CSV Formatı (.csv)</a></li>
+                </ul>
+            </div>
             <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm px-3 py-2 fw-semibold">
                 <i class="bi bi-arrow-left me-1"></i> Talepler Listesine Dön
             </a>
@@ -214,6 +221,25 @@
     </div>
 </div>
 
+<!-- AYLIK CSAT MEMNUNİYET TREND GRAFİĞİ -->
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0 fw-bold text-gray-800">
+                    <i class="bi bi-graph-up text-warning me-2"></i>Son 6 Aylık Müşteri Memnuniyeti (CSAT) Trendi
+                </h5>
+                <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle px-3 py-1 fw-bold">
+                    <i class="bi bi-star-fill text-warning me-1"></i>Aylık Ortalama Yıldız Skoru (1 - 5)
+                </span>
+            </div>
+            <div class="card-body" style="position: relative; height: 320px;">
+                <canvas id="csatTrendChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- CHART.JS SCRIPT TANIMLAMASI -->
 <script>
     document.addEventListener("DOMContentLoaded", function() {
@@ -277,6 +303,60 @@
                 },
                 scales: {
                     y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                }
+            }
+        });
+
+        // 3. Aylık CSAT Trend Çizgi Grafiği (Line Chart)
+        const csatTrendLabels = {{ csat_trend_labels_json|safe }};
+        const csatTrendValues = {{ csat_trend_values_json|safe }};
+
+        const ctxCsat = document.getElementById('csatTrendChart').getContext('2d');
+        new Chart(ctxCsat, {
+            type: 'line',
+            data: {
+                labels: csatTrendLabels,
+                datasets: [{
+                    label: 'Ortalama CSAT Puanı',
+                    data: csatTrendValues,
+                    borderColor: '#f6c23e',
+                    backgroundColor: 'rgba(246, 194, 62, 0.15)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.35,
+                    pointBackgroundColor: '#f6c23e',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2,
+                    pointRadius: 6,
+                    pointHoverRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return 'Ortalama Puan: ' + context.parsed.y + ' / 5.0';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 0,
+                        max: 5,
+                        ticks: {
+                            stepSize: 1,
+                            callback: function(val) { return val + ' ★'; }
+                        },
+                        grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                    },
+                    x: {
+                        grid: { display: false }
+                    }
                 }
             }
         });

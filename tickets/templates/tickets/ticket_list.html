@@ -31,9 +31,16 @@
     </h2>
     <div class="d-flex align-items-center gap-2 flex-wrap">
         {% if user.is_staff %}
-        <a href="{% url 'export_tickets_csv' %}?q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}{% if filter_mine %}&mine=1{% endif %}" class="btn btn-outline-success fw-semibold shadow-xs" title="Mevcut filtrelerle Excel/CSV raporu indir">
-            <i class="bi bi-file-earmark-spreadsheet-fill me-1"></i> Excel / CSV İndir
-        </a>
+        <div class="dropdown">
+            <button class="btn btn-outline-success fw-semibold shadow-xs dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Mevcut filtrelerle rapor indir">
+                <i class="bi bi-file-earmark-spreadsheet-fill me-1"></i> Dışa Aktar
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end shadow border-0">
+                <li><h6 class="dropdown-header text-uppercase small fw-bold">Rapor Formatı</h6></li>
+                <li><a class="dropdown-item py-2" href="{% url 'export_tickets_excel' %}?q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&tag={{ selected_tag }}{% if filter_mine %}&mine=1{% endif %}"><i class="bi bi-file-earmark-excel-fill text-success me-2"></i>Excel Raporu (.xlsx)</a></li>
+                <li><a class="dropdown-item py-2" href="{% url 'export_tickets_csv' %}?q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&tag={{ selected_tag }}{% if filter_mine %}&mine=1{% endif %}"><i class="bi bi-file-earmark-text-fill text-primary me-2"></i>CSV Formatı (.csv)</a></li>
+            </ul>
+        </div>
         {% endif %}
         <a href="{% url 'ticket_create' %}" class="btn btn-success fw-semibold">
             <i class="bi bi-plus-circle me-1"></i> Yeni Talep Oluştur
@@ -129,7 +136,7 @@
             {% endif %}
 
             <!-- Metin Arama Kutusu -->
-            <div class="col-md-3">
+            <div class="col-lg-3 col-md-6">
                 <label for="q" class="form-label fw-bold small text-muted">Kelime ile Ara</label>
                 <div class="input-group">
                     <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
@@ -138,7 +145,7 @@
                 </div>
             </div>
             <!-- Durum Filtresi -->
-            <div class="col-md-2">
+            <div class="col-lg-2 col-md-3">
                 <label for="status" class="form-label fw-bold small text-muted">Durum</label>
                 <select name="status" id="status" class="form-select">
                     <option value="">Tüm Durumlar</option>
@@ -152,7 +159,7 @@
                 </select>
             </div>
             <!-- Öncelik Filtresi -->
-            <div class="col-md-2">
+            <div class="col-lg-2 col-md-3">
                 <label for="priority" class="form-label fw-bold small text-muted">Öncelik</label>
                 <select name="priority" id="priority" class="form-select">
                     <option value="">Tüm Öncelikler</option>
@@ -165,31 +172,41 @@
                     {% endfor %}
                 </select>
             </div>
+            <!-- Etiket Filtresi -->
+            <div class="col-lg-2 col-md-4">
+                <label for="tag" class="form-label fw-bold small text-muted">Etiket</label>
+                <select name="tag" id="tag" class="form-select">
+                    <option value="">Tüm Etiketler</option>
+                    {% for t in tags %}
+                        <option value="{{ t.slug }}" {% if selected_tag == t.slug %}selected{% endif %}>{{ t.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <!-- Sıralama -->
-            <div class="col-md-2">
+            <div class="col-lg-1 col-md-4">
                 <label for="sort" class="form-label fw-bold small text-muted">Sıralama</label>
-                <select name="sort" id="sort" class="form-select">
+                <select name="sort" id="sort" class="form-select px-1">
                     <option value="newest" {% if selected_sort == 'newest' %}selected{% endif %}>En Yeni</option>
                     <option value="oldest" {% if selected_sort == 'oldest' %}selected{% endif %}>En Eski</option>
-                    <option value="most_commented" {% if selected_sort == 'most_commented' %}selected{% endif %}>En Çok Yorum Alanlar</option>
+                    <option value="most_commented" {% if selected_sort == 'most_commented' %}selected{% endif %}>Çok Yorum</option>
                 </select>
             </div>
             <!-- Çözüm Durumu -->
-            <div class="col-md-2">
+            <div class="col-lg-1 col-md-4">
                 <label for="solution" class="form-label fw-bold small text-muted">Çözüm</label>
-                <select name="solution" id="solution" class="form-select">
+                <select name="solution" id="solution" class="form-select px-1">
                     <option value="all" {% if selected_solution == 'all' %}selected{% endif %}>Tümü</option>
-                    <option value="solved" {% if selected_solution == 'solved' %}selected{% endif %}>✓ Çözülenler</option>
-                    <option value="unsolved" {% if selected_solution == 'unsolved' %}selected{% endif %}>&#x231B;&#xFE0E; Çözülmeyenler</option>
+                    <option value="solved" {% if selected_solution == 'solved' %}selected{% endif %}>✓ Çözülen</option>
+                    <option value="unsolved" {% if selected_solution == 'unsolved' %}selected{% endif %}>Çözülmeyen</option>
                 </select>
             </div>
 
             <!-- Butonlar -->
-            <div class="col-md-1 d-flex align-items-end gap-1">
+            <div class="col-lg-1 col-md-12 d-flex align-items-end gap-1">
                 <button type="submit" class="btn btn-primary w-100" title="Filtrele">
                     <i class="bi bi-funnel"></i>
                 </button>
-                {% if search_query or selected_status or selected_priority or selected_sort != 'newest' or selected_solution != 'all' %}
+                {% if search_query or selected_status or selected_priority or selected_tag or selected_sort != 'newest' or selected_solution != 'all' %}
                 <a href="{% url 'ticket_list' %}{% if filter_mine %}?mine=1{% endif %}" class="btn btn-outline-secondary" title="Sıfırla">
                     <i class="bi bi-x-lg"></i>
                 </a>
@@ -214,11 +231,12 @@
 
             <div class="d-flex align-items-center gap-2 flex-wrap">
                 <!-- İşlem Türü -->
-                <select name="bulk_action" id="bulkActionSelect" class="form-select form-select-sm" style="width: 170px;" onchange="handleBulkActionChange()">
+                <select name="bulk_action" id="bulkActionSelect" class="form-select form-select-sm" style="width: 190px;" onchange="handleBulkActionChange()">
                     <option value="">İşlem Seçiniz...</option>
                     <option value="status">Durumu Değiştir</option>
                     <option value="assign">Yöneticiye Ata</option>
                     <option value="category">Kategori Değiştir</option>
+                    <option value="merge">Seçilenleri Birleştir (Merge)</option>
                 </select>
 
                 <!-- Dinamik Hedef Değerler -->
@@ -296,6 +314,16 @@
                             {% else %}
                             <span class="badge bg-light text-muted border rounded-pill" style="font-size: 0.75rem;" title="Özel Gizli Talep"><i class="bi bi-lock-fill me-1"></i>Özel</span>
                             {% endif %}
+                            {% if ticket.merged_into %}
+                            <span class="badge bg-secondary-subtle text-secondary border rounded-pill ms-1" style="font-size: 0.75rem;" title="Bu talep #{{ ticket.merged_into.ticket_number }} ile birleştirilmiştir">
+                                <i class="bi bi-intersect me-1"></i>Birleştirildi
+                            </span>
+                            {% endif %}
+                            {% for ttag in ticket.tags.all %}
+                            <a href="?tag={{ ttag.slug }}" class="badge rounded-pill text-decoration-none ms-1 shadow-xs" style="background-color: {{ ttag.color }}; color: #fff; font-size: 0.72rem;">
+                                <i class="bi bi-tag-fill me-1"></i>{{ ttag.name }}
+                            </a>
+                            {% endfor %}
                             {% if ticket.comment_count > 0 %}
                             <span class="badge bg-secondary rounded-pill ms-1" title="Yorum Sayısı"><i class="bi bi-chat-text me-1"></i>{{ ticket.comment_count }}</span>
                             {% endif %}
@@ -487,6 +515,14 @@ function prepareBulkSubmit() {
         targetValue = document.getElementById('bulkAssignSelect').value;
     } else if (action === 'category') {
         targetValue = document.getElementById('bulkCategorySelect').value;
+    } else if (action === 'merge') {
+        if (checkboxes.length < 2) {
+            alert('Talepleri birleştirmek için en az 2 adet talep seçmelisiniz.');
+            return false;
+        }
+        targetValue = 'merge';
+        document.getElementById('bulkTargetValue').value = targetValue;
+        return confirm(checkboxes.length + ' adet talep en eski talep altında BİRLEŞTİRİLECEK (Merge) ve diğerleri kapatılacaktır. Onaylıyor musunuz?');
     }
 
     if (!targetValue) {

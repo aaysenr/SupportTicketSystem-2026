@@ -40,6 +40,33 @@ class Category(models.Model):
         return self.name
 
 
+class TicketTag(models.Model):
+    """Destek talepleri için renkli etiketleme modeli (#donanım, #vpn, #acil-iade vs.)."""
+    name = models.CharField(max_length=50, unique=True, verbose_name="Etiket Adı")
+    slug = models.SlugField(max_length=50, unique=True, blank=True)
+    color = models.CharField(
+        max_length=20,
+        default="#2563eb",
+        verbose_name="Renk Kodu",
+        help_text="Örn: #2563eb, #dc2626, #16a34a, #d97706, #9333ea"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Oluşturulma Tarihi")
+
+    class Meta:
+        verbose_name = "Talep Etiketi"
+        verbose_name_plural = "Talep Etiketleri"
+        ordering = ['name']
+
+    def __str__(self):
+        return f"#{self.name}"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            from django.utils.text import slugify
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+
 def is_holiday_or_weekend(dt):
     """
     Tarihin hafta sonu (Cumartesi, Pazar) veya resmi/dini bayram tatili
@@ -214,6 +241,21 @@ class Ticket(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="Oluşturulma Tarihi")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Güncellenme Tarihi")
+    tags = models.ManyToManyField(
+        TicketTag,
+        blank=True,
+        related_name='tickets',
+        verbose_name="Etiketler"
+    )
+    merged_into = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='merged_tickets',
+        verbose_name="Birleştirilen Ana Talep",
+        help_text="Eğer bu talep mükerrer ise ve başka bir ana talep ile birleştirildiyse referans verir."
+    )
 
     class Meta:
         verbose_name = "Destek Talebi"

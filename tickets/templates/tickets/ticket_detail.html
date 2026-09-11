@@ -18,6 +18,11 @@
         </a>
 
         {% if user.is_staff %}
+            {% if not ticket.merged_into %}
+            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#mergeTicketModal" title="Bu talebi başka bir mükerrer talep ile birleştir">
+                <i class="bi bi-intersect me-1"></i> Talebi Birleştir
+            </button>
+            {% endif %}
             <!-- Yöneticiler hem düzenleyebilir / durum değiştirebilir hem de silebilir -->
             <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
                 <i class="bi bi-pencil-square me-1"></i> Talebi Düzenle / Durum Değiştir
@@ -45,6 +50,39 @@
     </div>
 </div>
 
+<!-- BİRLEŞTİRİLME DURUM BİLDİRİM BANNERLARI -->
+{% if ticket.merged_into %}
+<div class="alert alert-warning border-warning shadow-sm rounded-3 d-flex align-items-center gap-3 mb-4" role="alert">
+    <i class="bi bi-intersect fs-3 text-warning"></i>
+    <div>
+        <h6 class="fw-bold mb-1">Bu Talep Birleştirilmiştir</h6>
+        <p class="mb-0 small text-body-secondary">
+            Bu destek talebi kapatılmış ve 
+            <a href="{% url 'ticket_detail' ticket.merged_into.id %}" class="fw-bold text-dark text-decoration-underline">
+                #{{ ticket.merged_into.ticket_number }} - {{ ticket.merged_into.title }}
+            </a>
+            ana talebi ile birleştirilmiştir. Tüm yanıt ve güncellemeleri ana talep üzerinden takip edebilirsiniz.
+        </p>
+    </div>
+</div>
+{% endif %}
+
+{% if ticket.merged_tickets.all %}
+<div class="alert alert-info border-info-subtle bg-info-subtle shadow-sm rounded-3 d-flex align-items-center gap-3 mb-4" role="alert">
+    <i class="bi bi-intersect fs-3 text-info"></i>
+    <div>
+        <h6 class="fw-bold mb-1 text-info-emphasis">Birleştirilmiş Mükerrer Talepler ({{ ticket.merged_tickets.count }})</h6>
+        <div class="d-flex flex-wrap gap-2 mt-1">
+            {% for m in ticket.merged_tickets.all %}
+            <a href="{% url 'ticket_detail' m.id %}" class="badge bg-white text-info-emphasis border border-info-subtle py-2 px-3 text-decoration-none shadow-xs">
+                <i class="bi bi-link-45deg me-1"></i>#{{ m.ticket_number }} - {{ m.title|truncatechars:40 }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Talep Detay Ana Kartı -->
 <div class="card shadow-sm mb-4 border-0 rounded-3">
     <!-- Kart Başlığı -->
@@ -71,6 +109,13 @@
             <span id="ticket-solved-badge" class="badge bg-success text-white rounded-pill px-2 py-1 {% if not has_solution and ticket.status != 'resolved' %}d-none{% endif %}">
                 <i class="bi bi-check-circle-fill me-1"></i>Çözüldü
             </span>
+
+            <!-- Talep Etiketleri (Tags) -->
+            {% for tag in ticket.tags.all %}
+            <a href="{% url 'ticket_list' %}?tag={{ tag.slug }}" class="badge rounded-pill text-decoration-none shadow-xs" style="background-color: {{ tag.color }}; color: #fff; font-size: 0.78rem;" title="Etikete göre filtrele">
+                <i class="bi bi-tag-fill me-1"></i>{{ tag.name }}
+            </a>
+            {% endfor %}
         </div>
 
         <!-- Öncelik ve Durum Rozetleri -->
@@ -742,6 +787,47 @@
         </div>
     </div>
 </div>
+
+{% if user.is_staff and not ticket.merged_into %}
+<!-- TALEP BİRLEŞTİRME MODALI (MERGE TICKETS) -->
+<div class="modal fade" id="mergeTicketModal" tabindex="-1" aria-labelledby="mergeTicketModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title fw-bold" id="mergeTicketModalLabel">
+                    <i class="bi bi-intersect me-2"></i>Talebi Birleştir (Merge)
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <form method="POST" action="{% url 'merge_tickets' %}">
+                {% csrf_token %}
+                <input type="hidden" name="primary_ticket_id" value="{{ ticket.id }}">
+                <div class="modal-body p-4">
+                    <div class="alert alert-warning small mb-3">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                        <strong>Dikkat:</strong> Birleştirilen ikincil talep kapatılacak ve etiketleri bu ana talebe aktarılacaktır. Her iki talebe de sistem tarafından otomatik bilgilendirme notu eklenecektir.
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-muted">Ana Talep (Mevcut Açık Talep)</label>
+                        <input type="text" class="form-control form-control-sm bg-light" value="#{{ ticket.ticket_number }} - {{ ticket.title }}" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label for="secondary_ticket_id" class="form-label fw-bold small text-muted">Bu Talebe Birleştirilecek İkincil Talep ID'si</label>
+                        <input type="number" class="form-control" id="secondary_ticket_id" name="secondary_ticket_id" placeholder="Örn: 12" required min="1">
+                        <div class="form-text small">Kapatılarak bu talebe dahil edilecek mükerrer talebin ID numarasını giriniz.</div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary rounded-pill px-3" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary rounded-pill px-4" onclick="return confirm('Bu iki talebi birleştirmek istediğinize emin misiniz? Bu işlem geri alınamaz.');">
+                        <i class="bi bi-check-circle me-1"></i> Birleştirmeyi Onayla
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <!-- AJAX ile Kesintisiz Beğeni (Like) ve Çözüm (Solution) Yönetimi JavaScript -->
 <script>

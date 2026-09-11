@@ -1,26 +1,19 @@
 from django.contrib import admin
-from .models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, CannedResponse
+from .models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, CannedResponse, TicketTag
 
-#from django.contrib import admin: Django'nun yönetim paneli araçlarını projeye dahil eder.
-#from .models import ...: Aynı klasördeki (.) models.py dosyasından hazırladığımız 3 modeli içe aktarır.
-
+@admin.register(TicketTag)
+class TicketTagAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'color', 'created_at')
+    search_fields = ('name',)
+    prepopulated_fields = {'slug': ('name',)}
 
 
 # 1. Kategori Modeli Yönetimi
 
 @admin.register(Category)
-
-# @admin.register(...): Python'da Decorator (Dekoratör) olarak adlandırılır.
-
-# Modeli admin paneline kaydetmek için eski yöntem olan admin.site.register(Category, CategoryAdmin) yazmak yerine, 
-# sınıfın hemen üzerine bu etiketi koyarak modeli ve ona ait yönetim ayarlarını birbirine bağlarız.
-
-
 class CategoryAdmin(admin.ModelAdmin):
-    # class CategoryAdmin(admin.ModelAdmin): Django'nun temel ModelAdmin sınıfından miras alarak
-    # Category tablosunun admin panelindeki görünüm kurallarını yazarız.
-
-    list_display = ('id', 'name', 'description') # Admin listesinde görünecek sütunlar
+    list_display = ('id', 'name', 'description')
+    search_fields = ('name',)
     #Admin panelinde kategoriler listelendiğinde ekranda tablo sütunu olarak nelerin görüneceğini belirler (ID, Kategori Adı ve Açıklama).
 
     
