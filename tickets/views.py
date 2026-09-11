@@ -3,6 +3,7 @@ import mimetypes
 import json
 import re
 import threading
+import logging
 import nh3
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, FileResponse, HttpResponseForbidden, Http404
@@ -29,21 +30,7 @@ from .totp import (
     get_totp_uri, generate_qr_code_data_uri
 )
 
-"""
-login, logout, authenticate:
-
-authenticate: Kullanıcı adı ve şifrenin veritabanındaki hash'lenmiş şifreyle eşleşip eşleşmediğini kontrol eder.
-
-login: Başarılı giriş sonrası kullanıcının tarayıcısına güvenli bir session (oturum) çerezi bırakır.
-
-logout: Kullanıcının aktif oturum çerezini siler ve oturumu kapatır.
-
-UserCreationForm, AuthenticationForm: Django'nun şifre kurallarını (en az 8 karakter, karmaşıklık vb.) ve güvenlik kontrollerini otomatik yapan hazır form sınıflarıdır.
-
-@login_required: Bir görünümün (View) başına konulduğunda, oturum açmamış kullanıcıların o sayfayı açmasını engelleyen bekçidir (decorator).
-
-messages: İşlem tamamlandığında (Örn: "Hesap oluşturuldu", "Yorum eklendi") ekrana bir kerelik Bootstrap alert kutusu basmamızı sağlayan mesaj çerçevesidir.
-"""
+logger = logging.getLogger(__name__)
 
 @login_required
 def admin_dashboard_view(request):
@@ -315,81 +302,18 @@ def login_user(request):
     return render(request, 'tickets/login.html', context)
 
 
-    #AuthenticationForm(request, data=request.POST): Giriş verilerini alan formdur.
-
-    #authenticate(...): Veritabanında bu kullanıcı adı ve parola doğru mu diye sorgular. Doğruysa User nesnesi döner, yanlışsa None döner.
-
-    #login(request, user): Oturumu başlatır.
-
-
-
-
 
 def logout_user(request):
     """
     Kullanıcı oturum kapatma görünümü.
     """
-    logout(request)
-    messages.info(request, "Oturumunuz başarıyla kapatıldı.")
-    return redirect('login')
-
-#logout(request): Oturumu sıfırlar.
-
-#redirect('login'): Çıkış yapan kullanıcıyı tekrar giriş yapabileceği login sayfasına postalar.
-
-
-
-
-
-
-
-
-"""
-@login_required Yapısı Nasıl Çalışır?
-Anonim bir ziyaretçi /ticket/new/ veya /ticket/1/ sayfasına girmeye çalışırsa
-Django isteği keser ve kullanıcıyı otomatik olarak /accounts/login/?next=/ticket/new/ adresine yönlendirir. 
-Giriş yapmadan içerik gösterilmez.
-
-
-
-
-
-Artık @login_required sayesinde fonksiyon çalıştığı anda kullanıcının oturum açtığı kesinleştiği için:
-geçici else dalları (ticket.created_by = User.objects.first() # <-- GEÇİCİ KOD)
-tamamen kaldırıldı ve doğrudan request.user atandı.
-"""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# --- 2. DESTEK TALEBİ GÖRÜNÜMLERİ (KORUMALI) ---
-
 @login_required
 def ticket_list(request):
-
-    # Django'da bir sayfa istendiğinde çalışacak fonksiyon tanımlanır.
-
-    # request: Tarayıcıdan gelen HTTP isteğine dair tüm bilgileri (kullanıcı oturumu, ip adresi, form verileri vb.) taşıyan zorunlu parametredir.
-     
     """
     Talepleri listeleyen görünüm.
     - Yöneticiler (is_staff) TÜM talepleri görür.
     - Normal kullanıcılar SADECE kendi açtıkları talepleri görür.
     """
-
-
-
     filter_mine = request.GET.get('mine') == '1' or request.GET.get('filter') == 'mine'
     profile = getattr(request.user, 'profile', None)
     is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
@@ -419,17 +343,6 @@ def ticket_list(request):
                 Q(is_public=True) | Q(created_by=request.user)
             ).select_related('created_by', 'category', 'assigned_to')
 
-
-
-
-    # base_tickets (Temel Veri Havuzu): Filtreleme yapılmadan önceki ham yetki havuzudur. 
-    # İstatistikler bu temel küme üzerinden hesaplanır; böylece kullanıcı arama kutusuna bir kelime yazıp tabloyu daraltsa bile üstteki toplam sayaçlar doğru genel toplamı göstermeye devam eder.
-
-    #request.user.is_staff: Kullanıcının yönetici / teknik destek ekibinde olup olmadığını kontrol eder.
-
-    #filter(created_by=request.user): Standart kullanıcıya ait olmayan talepleri daha SQL seviyesinde ayıklar (WHERE created_by_id = ?). 
-    # Arama ve filtreler de sadece bu daraltılmış liste üzerinde çalışır.
-    
     # 2. İstatistik Sayaçları (Koşullu Toplama - Tek SQL Sorgusu)
     counts = base_tickets.aggregate(
         total=Count('id'),
@@ -443,52 +356,43 @@ def ticket_list(request):
     in_progress_count = counts['in_progress']
     resolved_count = counts['resolved']
     urgent_count = counts['urgent']
-    
 
     # 3. URL Arama ve Filtreleme İşlemleri
     tickets = base_tickets.annotate(comment_count=Count('comments'))
     
-    # URL'den gelen GET parametrelerini yakalıyoruz
     search_query = request.GET.get('q', '').strip()
     selected_status = request.GET.get('status', '').strip()
     selected_priority = request.GET.get('priority', '').strip()
     selected_sort = request.GET.get('sort', 'newest').strip()
     selected_solution = request.GET.get('solution', 'all').strip()
 
-    # Kelime Arama Filtresi (Başlıkta VEYA Açıklamada arar)
     if search_query:
         tickets = tickets.filter(
             Q(title__icontains=search_query) | Q(description__icontains=search_query)
         )
 
-    # Durum Filtresi
     if selected_status:
         tickets = tickets.filter(status=selected_status)
 
-    # Öncelik Filtresi
     if selected_priority:
         tickets = tickets.filter(priority=selected_priority)
 
-    # Çözüm Durumu Filtresi
     if selected_solution == 'solved':
         tickets = tickets.filter(Q(status='resolved') | Q(comments__is_solution=True)).distinct()
     elif selected_solution == 'unsolved':
         tickets = tickets.exclude(status='resolved').exclude(comments__is_solution=True).distinct()
 
-    # Sıralama (Sort)
     if selected_sort == 'oldest':
         tickets = tickets.order_by('created_at')
     elif selected_sort == 'most_commented':
         tickets = tickets.order_by('-comment_count', '-created_at')
-    else:  # newest
+    else:
         tickets = tickets.order_by('-created_at')
 
-    # Sayfalama (Pagination - Sayfa başına 10 talep)
     paginator = Paginator(tickets, 10)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
 
-    # 4. Şablona verileri gönderiyoruz
     context = {
         'tickets': page_obj,
         'page_obj': page_obj,
@@ -500,8 +404,6 @@ def ticket_list(request):
         'filter_mine': filter_mine,
         'status_choices': Ticket.STATUS_CHOICES,
         'priority_choices': Ticket.PRIORITY_CHOICES,
-
-        # İstatistik Değişkenleri
         'total_count': total_count,
         'open_count': open_count,
         'in_progress_count': in_progress_count,
@@ -512,63 +414,16 @@ def ticket_list(request):
         'categories': Category.objects.all(),
         'staff_users': User.objects.filter(is_staff=True).order_by('username'),
     }
-    # Veritabanından çekilen veriyi HTML şablonuna aktarabilmek için bir Python dictionary (sözlük) yapısı oluşturulur.
-    # Sözlükteki 'tickets' anahtarı, HTML tarafında bu verilere erişmek için kullanacağımız değişken adı olacaktır.
 
-    """
-    Formu Hatırlama: search_query, selected_status ve selected_priority şablona geri gönderilir; 
-    böylece filtreleme yapıldıktan sonra kullanıcının yazdığı arama metni ve seçtiği dropdown kutusu seçili kalır.
-    STATUS_CHOICES & PRIORITY_CHOICES: Modelde tanımladığımız durum ve öncelik listelerini HTML tarafında <select> seçenekleri olarak döngüye sokmak için göndeririz.
-    """
-
-
-
-    # Şablonu ve veriyi birleştirip kullanıcıya HTML yanıtı dönüyoruz
     return render(request, 'tickets/ticket_list.html', context)
-
-    #render fonksiyonu 3 temel bileşeni bir araya getirir:
-    #request: Kullanıcı isteği.
-    #tickets/ticket_list.html: Verilerin basılacağı HTML şablonunun yolu.
-    #context: Şablona gönderilecek veri paketi.
-    #Bu işlem sonucunda Django dinamik olarak HTML içeriğini üretir ve tarayıcıya yanıt olarak gönderir.
-    #Çalışma Mantığı Özeti:
-    #Tarayıcı İsteği ➔ ticket_list (View) ➔ Ticket.objects.all() (Veritabanı) ➔ context (Veri Paketleme) ➔ ticket_list.html (Render) ➔ Kullanıcıya Gösterim
-
 
 
 @login_required
 def ticket_detail(request, pk):
-
     """
-    Tek bir destek talebinin detayını ve yorumlarını gösteren görünüm (View)
+    Tek bir destek talebinin detayını ve yorumlarını gösteren görünüm.
     """
-
-    #def ticket_detail(...): Detay sayfamızın iş mantığını yürüten View fonksiyonudur.
-
-    #request: Tarayıcıdan gelen HTTP isteğini (giriş yapan kullanıcı bilgisi, oturum vb.) taşır.
-
-    #pk (Primary Key): URL'den gelen dinamik ID numarasıdır (Örneğin kullanıcı /ticket/5/ adresine girerse pk = 5 olur).
-    
-    
-   
-    # 1. get_object_or_404: Veritabanında belirtilen pk (primary key / id) değerine sahip Ticket'ı arar.
-    # Bulursa 'ticket' değişkenine atar, bulamazsa kullanıcıya 404 hatası döner.
-    # 1. get_object_or_404: İlişkili verileri tek sorguda çek
     ticket = get_object_or_404(Ticket.objects.select_related('created_by', 'category', 'assigned_to'), pk=pk)
-
-    """
-    Ticket: Arama yapılacak model/tablo.
-
-    pk=pk: Veritabanındaki id sütunu, fonksiyona gelen pk değerine eşit olan satırı bulur.
-
-    Çalışma Mantığı:
-
-    Normalde Ticket.objects.get(pk=pk) yazsaydık ve o ID'de bir talep olmasaydı sistem DoesNotExist hatası vererek 500 Server Error ile çökerdi.
-
-    get_object_or_404 ise arka planda otomatik bir try-except bloğu çalıştırarak kayıt yoksa kullanıcıya standart bir 404 Sayfa Bulunamadı ekranı döner.
-    
-    """
-
 
     # GİZLİLİK VE RBAC KONTROLÜ:
     profile = getattr(request.user, 'profile', None)
@@ -583,61 +438,16 @@ def ticket_detail(request, pk):
                 messages.error(request, "Bu departman/kategoriye ait talepleri görüntüleme yetkiniz bulunmamaktadır!")
                 return redirect('ticket_list')
 
-
     comments = ticket.comments.all()
-
     if not request.user.is_staff:
-       comments = comments.filter(is_internal=False)
-
+        comments = comments.filter(is_internal=False)
     comments = comments.select_related('author')
 
-  
-
-    """
-    Ters İlişki (Reverse Relation): models.py dosyasında TicketComment modelini yazarken ticket = ForeignKey(Ticket, related_name='comments') tanımlaması yapmıştık.
-
-    Bu sayede ne Yapar? 
-    
-    Django ORM arka planda SELECT * FROM tickets_ticketcomment WHERE ticket_id = 3 ORDER BY created_at ASC sorgusunu çalıştırır 
-    ve doğrudan bu talebe yazılmış yorumları kronolojik listeler.
-    """
-    
-    
     if request.method == 'POST':
-        # Yorum gönderme butonu tıklandıysa (POST isteği)
         comment_form = CommentForm(request.POST, request.FILES, user=request.user)
-        # request.FILES: Kullanıcının form üzerinden yüklediği dosya verilerini tutan sözlüktür.
-        # request.POST: Kullanıcının form üzerinden gönderdiği metin verilerini (başlık, açıklama, kategori vb.) tutar.
-        # user=request.user: Formun içine, şu an giriş yapmış olan kullanıcının bilgilerini "yazar" olarak kaydeder.    
-
         if comment_form.is_valid():
-
-            #if request.method == 'POST': Kullanıcı detay sayfasındaki "Yorum Yap / Gönder" butonuna bastığında çalışır.
-
-            #CommentForm(request.POST): Kullanıcının form kutusuna yazdığı metni forma doldurur.
-
-            #comment_form.is_valid(): Yorum alanının boş bırakılıp bırakılmadığını veya kural ihlali olup olmadığını denetler.
-
-
-
-
-
-
-            # Yorum nesnesini oluştur ama veritabanına henüz yazma (ticket ve author bilgisi eksik!)
             comment = comment_form.save(commit=False)
-            
-            # Yorumun yazıldığı talebi (ticket) ilişkilendir
             comment.ticket = ticket
-
-
-            #commit=False: Yorum nesnesini bellekte oluşturur ama henüz SQL INSERT yapmaz.
-
-            #comment.ticket = ticket (Kritik Adım): TicketComment modeli hangi talebe yorum yapıldığını bilmek zorundadır (ForeignKey). 
-            #Kullanıcıya formda talep seçtirmedik; URL'den çektiğimiz mevcut ticket nesnesini yoruma burada arka planda bağlıyoruz.
-            
-
-
-            # Giriş yapmış olan oturum sahibini doğrudan yazar olarak atıyoruz
             comment.author = request.user
             comment.save()
 
@@ -716,7 +526,6 @@ def ticket_detail(request, pk):
             Q(category=ticket.category) | Q(category__isnull=True)
         )
 
-    # 3. HTML şablonuna gönderilecek veri paketini hazırlınır
     context = {
         'ticket': ticket,
         'comments': comments,
@@ -726,73 +535,21 @@ def ticket_detail(request, pk):
         'canned_responses': canned_responses,
     }
 
-    """
-    Context Sözlüğü (Veri Paketi): Python tarafında hazırladığımız verileri HTML şablonuna taşımak için hazırlanan çantadır.
-
-    'ticket': Tek bir talebin tüm özelliklerini (title, description, status vb.) tutar.
-
-    'comments': O talebe ait yorum listesini tutar.
-
-    """
-
-
-    # 4. Şablonu render edip kullanıcıya sunuyoruz
     return render(request, 'tickets/ticket_detail.html', context)
 
-    """
-    render(...): tickets/ticket_detail.html dosyasını açar, 
-    içindeki {{ ticket.title }} ve {% for comment in comments %} gibi
-    dinamik alanları gerçek verilerle doldurur 
-    ve tarayıcıya saf bir HTML sayfası olarak döndürür.
-    """
 
 @login_required
 def ticket_create(request): 
     """
-    Yeni destek talebi oluşturma görünümü (View).
-    GET isteği geldiğinde boş form gösterir.
-    POST isteği geldiğinde formu doğrular ve kaydeder.
+    Yeni destek talebi oluşturma görünümü.
+    GET isteği geldiğinde boş form gösterir, POST isteğinde doğrular ve kaydeder.
     """
-
-    # Bir web formunda iki aşama vardır: 
-    # Formu ekranda görmek (GET) ve doldurup sunucuya göndermek (POST). 
-    # Kod bu ayrımı if request.method == 'POST' kontrolüyle yönetir.
-
     if request.method == 'POST':
-        #Kullanıcı formu doldurup Gönder butonuna bastıysa (POST isteği)
-        # Kullanıcı formu ilk kez açtığında içi boş, temiz bir form nesnesi üretir ve ticket_form.html şablonuna gönderir.
         form = TicketForm(request.POST, request.FILES, user=request.user)
-        # request.FILES: Kullanıcının form üzerinden yüklediği dosya verilerini tutan sözlüktür.
-        # request.POST: Kullanıcının form üzerinden gönderdiği metin verilerini (başlık, açıklama, kategori vb.) tutar.
-        # user=request.user: Formun içine, şu an giriş yapmış olan kullanıcının bilgilerini "yazar" olarak kaydeder.
-        # Bir form HTML sayfasıdır. Kullanıcı bu formu doldurup "Gönder" (Submit) butonuna tıkladığında, tarayıcı sayfanın URL'ine bir POST isteği gönderir.
-        # Kullanıcının girdiği verileri (request.POST) alıp forma yükler.
-
         if form.is_valid():
-            # Form kurallara uygunsa (boş bırakılan zorunlu alan yoksa vb.)
-            # Girilen verilerin kurallara (zorunlu alanlar, maksimum karakter sınırları vb.) uygunluğunu doğrular. 
-            # Geçersizse hatalarla birlikte formu ekrana geri basar.
-
-
-            """
-            models.py dosyasında Ticket modelinin created_by alanını zorunlu (NOT NULL) tanımladık. 
-            Ancak TicketForm içinde bu alanı güvenlik nedeniyle kullanıcıya göstermedik (fields listesine eklemedik).
-            """
-
-            # commit=False: Nesneyi oluştur ama henüz veritabanına kaydetme (Çünkü created_by alanı henüz eksik!)
             ticket = form.save(commit=False)
-            # ticket = form.save(commit=False): Formdaki verilerden bir Ticket nesnesi üretir ama henüz veritabanına kaydetmez, bellekte bekletir.
-            
-
-
-            # Talebi oluşturan kişi oturum açmış olan kullanıcıdır
             ticket.created_by = request.user
-
-            # ticket.created_by = request.user: Eksik kalan "oluşturan kullanıcı" bilgisini arkadan sisteme giriş yapmış olan kullanıcı olarak atar.
-            
-            # Şimdi veritabanına tam kaydı gerçekleştirebiliriz
             ticket.save()
-            #ticket.save(): Nesne artık eksiksiz olduğu için veritabanına nihai kaydı (INSERT INTO) gerçekleştirir.
             
             TicketActivityLog.objects.create(
                ticket=ticket,
@@ -815,53 +572,29 @@ def ticket_create(request):
                         recipient_list=[ticket.assigned_to.email]
                     )
 
-
-
-        # E-POSTA BİLDİRİMİ: Kullanıcıya Teyit Maili Gönder
-        if ticket.created_by.email:
-            send_notification_email(
-                subject=f"[Destek Talebi] #{ticket.ticket_number} Talebiniz Başarıyla Alındı",
-                message=f"Merhaba {ticket.created_by.username},\n\n#{ticket.ticket_number} numaralı '{ticket.title}' başlıklı destek talebiniz sisteme kaydolmuştur.\n\nDestek ekibimiz en kısa sürede talebinizi inceleyip yanıtlayacaktır.\n\nİyi günler dileriz.",
-                recipient_list=[ticket.created_by.email]
-            )
+            if ticket.created_by.email:
+                send_notification_email(
+                    subject=f"[Destek Talebi] #{ticket.ticket_number} Talebiniz Başarıyla Alındı",
+                    message=f"Merhaba {ticket.created_by.username},\n\n#{ticket.ticket_number} numaralı '{ticket.title}' başlıklı destek talebiniz sisteme kaydolmuştur.\n\nDestek ekibimiz en kısa sürede talebinizi inceleyip yanıtlayacaktır.\n\nİyi günler dileriz.",
+                    recipient_list=[ticket.created_by.email]
+                )
 
             messages.success(request, "Destek talebiniz başarıyla oluşturuldu.") 
-
-
-            # İşlem bitince oluşturulan talebin detay sayfasına yönlendir
             return redirect('ticket_detail', pk=ticket.pk)
     else:
-        # Sayfaya ilk kez girildiyse (GET isteği) boş form üret
         form = TicketForm(user=request.user)
-        # form = TicketForm(): Tarayıcıdan henüz POST isteği gelmediği için (sayfa ilk açılış anı), içi boş temiz bir TicketForm nesnesi oluşturulur.
 
-    context = {
-        'form': form
-    }
-    # context = {'form': form}: İçinde doldurulacak boş form nesnesini barındıran paketi HTML şablonuna gönderir.
-
-    return render(request, 'tickets/ticket_form.html', context)
-
-    # Form başarıyla kaydedildikten sonra kullanıcıyı yeni oluşturulan talebin detay sayfasına (/ticket/<id>/) yönlendirir.
-    # Bu desen yazılım dünyasında Post/Redirect/Get (PRG) prensibi olarak bilinir ve kullanıcının F5 tuşuna basarak aynı talebi veritabanına mükerrer kaydetmesini önler.
+    return render(request, 'tickets/ticket_form.html', {'form': form})
 
 
 
 
 @login_required
 def ticket_edit(request, pk): 
-    # pk (Primary Key): Hangi talebin düzenleneceğini belirten kimlik numarasıdır (Örn: /ticket/3/edit/ için pk=3).
-    #pk: Var olan bir kaydı (bu durumda bir talebi) veritabanından benzersiz kimlik numarasına (Primary Key) göre bulup getirmek için URL'den alınan değişkendir.
-    
     """
-    Var olan bir destek talebini düzenleme ve durumunu güncelleme görünümü (View)
+    Var olan bir destek talebini düzenleme ve durumunu güncelleme görünümü.
     """
-
-    # 1. Düzenlenecek talebi ID'ye göre veritabanından çek (bulamazsa 404 dön)
     ticket = get_object_or_404(Ticket, pk=pk)
-    #Güvenli Nesne Çekme: Düzenlenmek istenen talep veritabanında mevcutsa ticket değişkenine atar; mevcut değilse sunucuyu çökertmeden 404 Not Found döner.
-
-   
     profile = getattr(request.user, 'profile', None)
     is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
 
@@ -882,28 +615,20 @@ def ticket_edit(request, pk):
         messages.error(request, "Çözülmüş veya kapatılmış destek talepleri düzenlenemez!")
         return redirect('ticket_detail', pk=ticket.pk)
 
-
     if request.method == 'POST':
-        # POST İsteği: Formdaki yeni verileri var olan 'ticket' nesnesinin üzerine yaz (instance=ticket)
-        
-        # Eski değerleri karşılaştırmak için hafızaya alıyoruz
         old_status = ticket.get_status_display()
         old_assigned = ticket.assigned_to.username if ticket.assigned_to else "Atanmadı"
         old_assigned_user = ticket.assigned_to
         
         form = TicketForm(request.POST, request.FILES, instance=ticket, user=request.user)
 
-        if form.is_valid(): # Form kurallara uygunsa (boş bırakılan zorunlu alan yoksa vb.)
-            
+        if form.is_valid():
             updated_ticket = form.save()
-            
-            # Değişiklikleri ve yeni durumları tespit edelim (new_status önceden tanımlanıyor)
             changes = []
-            new_status = updated_ticket.get_status_display() # Formdan gelen güncel durumu al
-            new_assigned = updated_ticket.assigned_to.username if updated_ticket.assigned_to else "Atanmadı" # Formdan gelen güncel atanan kullanıcıyı al
+            new_status = updated_ticket.get_status_display()
+            new_assigned = updated_ticket.assigned_to.username if updated_ticket.assigned_to else "Atanmadı"
 
-            
-           # CANLI BİLDİRİM: Durum değiştiyse bildirim oluştur (POST İÇİNDE)
+            # CANLI BİLDİRİM: Durum değiştiyse bildirim oluştur
             if old_status != new_status:
                 Notification.objects.create(
                     recipient=updated_ticket.created_by,
@@ -927,7 +652,7 @@ def ticket_edit(request, pk):
                         recipient_list=[updated_ticket.assigned_to.email]
                     )
 
-           # E-POSTA BİLDİRİMİ: Eğer durum değişmişse mail gönder
+            # E-POSTA BİLDİRİMİ: Eğer durum değişmişse mail gönder
             if old_status != new_status and updated_ticket.created_by.email:
                 send_notification_email(
                     subject=f"[Destek Talebi] #{updated_ticket.ticket_number} Durumu Güncellendi: {new_status}",
@@ -946,38 +671,17 @@ def ticket_edit(request, pk):
                         actor=request.user,
                         action=change
                     )
-
-
             
-           
             messages.success(request, "Destek talebi başarıyla güncellendi.")
             return redirect('ticket_detail', pk=ticket.pk)
-
-            """
-            instance=ticket (Kritik Parametre): Django'ya "Yeni bir satır oluşturma, gelen verileri bu mevcut ticket kaydının üzerine yaz" talimatını verir.
-
-            SQL Karşılığı: Arka planda INSERT INTO yerine doğrudan UPDATE tickets_ticket SET title=..., status=... WHERE id=3; sorgusu çalışır.
-
-            Yönlendirme: Güncelleme başarılı olduğunda kullanıcı doğrudan güncel detay sayfasına yönlendirilir (ticket_detail).
-            """
-
-
     else:
-        # GET İsteği: Formu var olan talebin mevcut verileriyle dolu olarak aç (instance=ticket)
-        form = TicketForm(instance=ticket, user=request.user) # user=request.user eklendi
-        # Formu Dolu Açma (GET): Kullanıcı sayfaya ilk girdiğinde, form kutularının içine mevcut talep verilerini (başlık, mevcut durum, kategori vb.) otomatik olarak doldurur.
-
+        form = TicketForm(instance=ticket, user=request.user)
 
     context = {
         'form': form,
         'ticket': ticket,
     }
-    # Aynı ticket_form.html şablonunu tekrar kullanıyoruz!
     return render(request, 'tickets/ticket_form.html', context)
-
-    # DRY (Don't Repeat Yourself) Prensibi: Sıfırdan yeni bir ticket_edit.html oluşturmak yerine, daha önce hazırladığımız ticket_form.html şablonunu tekrar kullanıyoruz. 
-    # context içerisine ticket bilgisini de ekleyerek şablon tarafında "Yeni Talep" mi yoksa "Talebi Düzenle" mi olduğunu ayırt edebilme esnekliği sağlıyoruz.
-
 
 
 @login_required
@@ -1013,27 +717,12 @@ def ticket_delete(request, pk):
 
     if request.method == 'POST':
         ticket_title = ticket.title
-        ticket.delete() # veritabanından tamamen siler.
+        ticket.delete()
         messages.success(request, f"'{ticket_title}' başlıklı talep başarıyla silindi.")
         return redirect('ticket_list')
         
     context = {'ticket': ticket}
     return render(request, 'tickets/ticket_confirm_delete.html', context)
-
- 
-
-
-
-    """
-    ticket = get_object_or_404(Ticket, pk=pk): Silinecek kaydı bulur.
-
-    if request.method == 'POST': Kullanıcı onay ekranındaki "Evet, Sil" butonuna bastığında çalışır.
-
-    ticket.delete(): İlgili talebi ve veritabanındaki CASCADE kuralı sayesinde bu talebe bağlı tüm yorumları (TicketComment) veritabanından kalıcı olarak temizler.
-
-    ticket_confirm_delete.html: GET isteğinde kullanıcıya "Emin misiniz?" onay kartını sunar.
-
-    """
 
 
 
@@ -1088,32 +777,22 @@ def _async_email_worker(subject, message, recipient_list):
                 message=message,
                 from_email=None,
                 recipient_list=[email for email in recipient_list if email],
-                fail_silently=True
+                fail_silently=False
             )
-    except Exception:
-        pass
+            logger.info("[E-POSTA] E-posta başarıyla gönderildi: Konu='%s'", subject)
+    except Exception as exc:
+        logger.error("[E-POSTA] E-posta gönderiminde hata: %s", exc)
 
 
 def send_notification_email(subject, message, recipient_list):
     """
     Güvenli ve Asenkron (Non-blocking) E-posta Bildirim Gönderici.
-    Ana HTTP istek döngüsünü bloke etmeden (0ms bekleme ile) arka planda e-posta gönderir.
+    Ana HTTP istek döngüsünü bloke etmeden arka planda e-posta gönderir.
     """
     if recipient_list and any(recipient_list):
         recipients = ", ".join([e for e in recipient_list if e])
-        
-        # Terminalde temiz ve tek bir Türkçe bildirim gösterelim:
-        try:
-            print("\n" + "="*60)
-            print(f"[E-POSTA] E-POSTA BİLDİRİMİ GÖNDERİLDİ (Asenkron Arka Plan)")
-            print(f"Alıcı : {recipients}")
-            print(f"Konu  : {subject}")
-            print(f"İçerik:\n{message}")
-            print("="*60 + "\n")
-        except Exception:
-            pass
+        logger.info("[E-POSTA] Bildirim e-postası kuyruğa alındı: Alıcı(lar)=%s, Konu='%s'", recipients, subject)
 
-        # Arka planda asenkron iş parçacığı (daemon thread) ile e-posta gönderimi
         worker_thread = threading.Thread(
             target=_async_email_worker,
             args=(subject, message, recipient_list),
