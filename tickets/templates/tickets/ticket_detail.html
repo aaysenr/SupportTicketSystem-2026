@@ -12,6 +12,11 @@
 
     <!-- Aksiyon Butonları (Yetki Kontrollü) -->
     <div class="d-flex gap-2 align-items-center">
+        <!-- PDF Rapor İndirme Butonu -->
+        <a href="{% url 'export_ticket_pdf' ticket.id %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3" title="Talebi Resmi PDF Raporu Olarak İndir">
+            <i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i> PDF İndir
+        </a>
+
         {% if user.is_staff %}
             <!-- Yöneticiler hem düzenleyebilir / durum değiştirebilir hem de silebilir -->
             <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
@@ -185,6 +190,28 @@
                 </div>
             </div>
         </div>
+
+        {% if user.is_staff %}
+        <!-- AI COPILOT: YÖNETİCİ TALEP ÖZETİ -->
+        <div class="card border-primary-subtle bg-primary-subtle mb-4 shadow-sm rounded-3">
+            <div class="card-body p-3 d-flex align-items-start gap-3">
+                <div class="fs-3 text-primary"><i class="bi bi-robot"></i></div>
+                <div class="flex-grow-1">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-primary text-white rounded-pill small px-2 py-1">
+                            <i class="bi bi-stars me-1"></i>AI Copilot Özeti (Yetkililere Özel)
+                        </span>
+                        <button type="button" id="btn-refresh-ai-summary" class="btn btn-outline-primary btn-sm border-0 py-0 px-2" title="Özeti Yeniden Oluştur">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+                        </button>
+                    </div>
+                    <div id="ai-summary-content" class="small text-primary-emphasis mt-1 lh-base">
+                        <div class="spinner-border spinner-border-sm text-primary me-2"></div><em>Yapay zekâ talep durumunu analiz ediyor...</em>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
         <!-- TALEP DOSYA / GÖRSEL EKİ ÖNİZLEMESİ -->
         {% if ticket.attachment %}
@@ -959,6 +986,21 @@ document.addEventListener('DOMContentLoaded', function () {
                             indicator.classList.add('d-none');
                             indicator.classList.remove('d-flex');
                         }
+
+                        // Sesli Bildirim ve Tarayıcı Masaüstü Bildirimi (Başka biri yazdıysa)
+                        if (data.author_id !== {{ user.id }}) {
+                            if (typeof playNotificationSound === 'function') {
+                                playNotificationSound();
+                            }
+                            if (typeof sendBrowserNotification === 'function') {
+                                const plainContent = (data.content || '').replace(/<[^>]*>?/gm, '').trim();
+                                sendBrowserNotification(
+                                    `#{{ ticket.ticket_number }} - Yeni Yanıt`,
+                                    `${data.author_name}: ${plainContent.slice(0, 90)}`,
+                                    window.location.href
+                                );
+                            }
+                        }
                     }
                 } catch (err) {
                     console.error('Ticket WS mesajı okunamadı:', err);
@@ -1016,6 +1058,36 @@ document.addEventListener('DOMContentLoaded', function () {
                 }, 2500);
             }
         });
+    }
+
+    // ==========================================
+    // AI TALEP COPILOT ÖZETİ YÜKLEYİCİSİ (YETKİLİLER İÇİN)
+    // ==========================================
+    const summaryContainer = document.getElementById('ai-summary-content');
+    const refreshSummaryBtn = document.getElementById('btn-refresh-ai-summary');
+
+    function fetchAiSummary() {
+        if (!summaryContainer) return;
+        summaryContainer.innerHTML = '<div class="spinner-border spinner-border-sm text-primary me-2"></div><em>Yapay zekâ talep geçmişini analiz ediyor...</em>';
+        fetch(`/api/ai/summarize/${ticketId}/`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success' && data.summary) {
+                    summaryContainer.innerHTML = `<strong>Özet:</strong> ${data.summary}`;
+                } else {
+                    summaryContainer.innerHTML = '<span class="text-muted">Özet çıkarılamadı.</span>';
+                }
+            })
+            .catch(() => {
+                summaryContainer.innerHTML = '<span class="text-muted">AI özet servisine ulaşılamadı.</span>';
+            });
+    }
+
+    if (summaryContainer) {
+        fetchAiSummary();
+        if (refreshSummaryBtn) {
+            refreshSummaryBtn.addEventListener('click', fetchAiSummary);
+        }
     }
 });
 </script>

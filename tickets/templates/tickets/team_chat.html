@@ -261,6 +261,17 @@
                 senderDiv.className = 'fw-bold small text-primary mb-1';
                 senderDiv.textContent = msg.sender_name || '';
                 bubble.appendChild(senderDiv);
+
+                // Sesli ve Masaüstü Bildirimi (Arka planda veya ekranda)
+                if (typeof window.playNotificationSound === 'function') {
+                    window.playNotificationSound();
+                }
+                if (typeof window.sendBrowserNotification === 'function') {
+                    window.sendBrowserNotification(`Yeni Ekip Mesajı: ${msg.sender_name || 'Yetkili'}`, {
+                        body: msg.content || 'Yeni bir ekip içi mesajınız var.',
+                        tag: `team-chat-${msg.message_id || Date.now()}`
+                    });
+                }
             }
 
             const contentDiv = document.createElement('div');

@@ -29,6 +29,9 @@ from .totp import (
     generate_totp_secret, get_totp_token, verify_totp_token,
     get_totp_uri, generate_qr_code_data_uri
 )
+from .pdf import generate_ticket_pdf
+from .webhooks import send_outgoing_webhook
+from .copilot import suggest_category_and_priority, generate_ticket_summary
 
 logger = logging.getLogger(__name__)
 
@@ -579,6 +582,10 @@ def ticket_create(request):
                     recipient_list=[ticket.created_by.email]
                 )
 
+            # Acil Durum Harici Webhook Tetikleyicisi (Slack / Discord / Teams)
+            if ticket.priority == 'urgent':
+                send_outgoing_webhook(ticket, event_type="urgent_ticket_created")
+
             messages.success(request, "Destek talebiniz başarıyla oluşturuldu.") 
             return redirect('ticket_detail', pk=ticket.pk)
     else:
@@ -672,6 +679,10 @@ def ticket_edit(request, pk):
                         action=change
                     )
             
+            # Acil Durum Harici Webhook Tetikleyicisi
+            if updated_ticket.priority == 'urgent':
+                send_outgoing_webhook(updated_ticket, event_type="urgent_ticket_updated")
+
             messages.success(request, "Destek talebi başarıyla güncellendi.")
             return redirect('ticket_detail', pk=ticket.pk)
     else:
@@ -1889,4 +1900,75 @@ def inbound_email_webhook(request):
 
     except Exception as e:
         return JsonResponse({'error': f'Ayrıştırma hatası: {str(e)}'}, status=500)
+
+
+# ==========================================
+# RESMİ TALEP RAPORU (PDF DIŞA AKTARMA)
+# ==========================================
+
+@login_required
+def export_ticket_pdf(request, pk):
+    """
+    Belirli bir destek talebini antetli, kurumsal ve Türkçe uyumlu A4 PDF belgesi olarak sunar.
+    Gizli taleplerde yetki kontrolü (RBAC) uygular.
+    """
+    ticket = get_object_or_404(Ticket.objects.select_related('created_by', 'category', 'assigned_to'), pk=pk)
+
+    profile = getattr(request.user, 'profile', None)
+    is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
+
+    # Gizlilik & RBAC Kontrolü:
+    if not ticket.is_public and ticket.created_by != request.user and ticket.assigned_to != request.user and not is_superadmin:
+        if not request.user.is_staff:
+            return HttpResponseForbidden("Bu özel talebin PDF raporunu indirme yetkiniz bulunmamaktadır.")
+        elif profile and profile.assigned_categories.exists() and ticket.category:
+            if not profile.assigned_categories.filter(id=ticket.category.id).exists():
+                return HttpResponseForbidden("Bu kategoriye ait talebin PDF raporunu indirme yetkiniz bulunmamaktadır.")
+
+    pdf_buffer = generate_ticket_pdf(ticket)
+    filename = f"talep_{ticket.ticket_number}_{timezone.now().strftime('%Y%m%d')}.pdf"
+    return FileResponse(pdf_buffer, as_attachment=True, filename=filename, content_type='application/pdf')
+
+
+# ==========================================
+# YAPAY ZEKÂ TALEP ASİSTANI (AI COPILOT) API
+# ==========================================
+
+@login_required
+def ai_suggest_meta_api(request):
+    """
+    Talep formu doldurulurken girilen başlık ve açıklamayı analiz ederek
+    otomatik kategori ve öncelik önerileri sunan canlı API.
+    """
+    title = request.GET.get('title') or request.POST.get('title') or ''
+    description = request.GET.get('description') or request.POST.get('description') or ''
+
+    if len(title.strip()) < 3 and len(description.strip()) < 5:
+        return JsonResponse({'status': 'idle', 'message': 'Yeterli metin girilmedi.'})
+
+    categories = Category.objects.all()
+    suggestion = suggest_category_and_priority(title, description, categories)
+    return JsonResponse({
+        'status': 'success',
+        **suggestion
+    })
+
+
+@login_required
+def ai_summarize_ticket_api(request, pk):
+    """
+    Destek personeli için talep ve çözüm sürecini 1 cümlelik özet halinde sunan API.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Yetkisiz erişim.'}, status=403)
+
+    ticket = get_object_or_404(Ticket.objects.select_related('created_by', 'category'), pk=pk)
+    summary = generate_ticket_summary(ticket)
+    return JsonResponse({
+        'status': 'success',
+        'ticket_id': ticket.id,
+        'ticket_number': ticket.ticket_number,
+        'summary': summary
+    })
+
 

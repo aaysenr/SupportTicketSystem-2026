@@ -781,5 +781,87 @@ class SecurityAndRBACWorkflowTests(TestCase):
         self.assertIn("güç kablosunu kontrol ettim", new_comment.content)
         self.assertNotIn("Eski mail alıntısı", new_comment.content)
 
+    # 4. AŞAMA 4 TESTLERİ (PDF DIŞA AKTARMA, AI COPILOT & WEBHOOK)
+    def test_export_ticket_pdf(self):
+        """Talep PDF çıktısının oluşturulmasını ve yetki kontrollerini test et (4.3)."""
+        pdf_url = reverse('export_ticket_pdf', kwargs={'pk': self.ticket_tech.pk})
+
+        # 1. Giriş yapmamış kullanıcı -> Login sayfasına yönlendirme (302)
+        res_anon = self.client.get(pdf_url)
+        self.assertEqual(res_anon.status_code, 302)
+
+        # 2. Yetkisiz başka bir standart kullanıcı -> 403 Forbidden
+        other_user = User.objects.create_user('jane_doe', 'jane@example.com', 'JanePass123!')
+        self.client.login(username='jane_doe', password='JanePass123!')
+        res_forbidden = self.client.get(pdf_url)
+        self.assertEqual(res_forbidden.status_code, 403)
+
+        # 3. Talebin sahibi (normal_user) -> 200 OK & application/pdf
+        self.client.login(username='john_doe', password='UserPass123!')
+        res_owner = self.client.get(pdf_url)
+        self.assertEqual(res_owner.status_code, 200)
+        pdf_bytes = b"".join(res_owner.streaming_content)
+        self.assertTrue(len(pdf_bytes) > 1000)
+        self.assertTrue(pdf_bytes.startswith(b'%PDF'))
+
+        # 4. Yetkili teknik destek personeli -> 200 OK & application/pdf
+        self.client.login(username='tech_agent', password='TechPass123!')
+        res_agent = self.client.get(pdf_url)
+        self.assertEqual(res_agent.status_code, 200)
+        self.assertEqual(res_agent['Content-Type'], 'application/pdf')
+
+    def test_ai_suggest_meta_api(self):
+        """AI Copilot canlı kategori ve öncelik öneri API'sini test et (4.4)."""
+        api_url = reverse('ai_suggest_meta_api')
+
+        # 1. Giriş yapmamış kullanıcı -> 302 Redirect
+        res_anon = self.client.get(api_url)
+        self.assertEqual(res_anon.status_code, 302)
+
+        self.client.login(username='john_doe', password='UserPass123!')
+
+        # 2. Yetersiz metin -> idle
+        res_idle = self.client.get(f"{api_url}?title=ab&description=cd")
+        self.assertEqual(res_idle.status_code, 200)
+        self.assertEqual(res_idle.json()['status'], 'idle')
+
+        # 3. Kritik fatura ödeme hatası metni -> Urgent & Finans tahmini
+        res_urgent = self.client.get(
+            f"{api_url}?title=Acil Fatura Sorunu&description=Kredi kartımdan ödeme çekildi fakat sistem çöktü fatura dekontu çıkmadı"
+        )
+        self.assertEqual(res_urgent.status_code, 200)
+        data = res_urgent.json()
+        self.assertEqual(data['status'], 'success')
+        self.assertEqual(data['suggested_priority'], 'urgent')
+        self.assertEqual(data['suggested_category_name'], 'Finans')
+
+    def test_ai_summarize_ticket_api(self):
+        """AI Copilot tek cümlelik yönetici özeti API'sini test et (4.4)."""
+        summary_url = reverse('ai_summarize_ticket_api', kwargs={'pk': self.ticket_tech.pk})
+
+        # 1. Standart kullanıcı -> 403 Forbidden
+        self.client.login(username='john_doe', password='UserPass123!')
+        res_user = self.client.get(summary_url)
+        self.assertEqual(res_user.status_code, 403)
+
+        # 2. Yetkili personel -> 200 OK ve özet metni
+        self.client.login(username='tech_agent', password='TechPass123!')
+        res_staff = self.client.get(summary_url)
+        self.assertEqual(res_staff.status_code, 200)
+        data = res_staff.json()
+        self.assertEqual(data['status'], 'success')
+        self.assertIn("john_doe", data['summary'])
+        self.assertIn("Yazıcı Arızası", data['summary'])
+
+    def test_outgoing_webhook_dispatcher(self):
+        """Acil durum dışa giden webhook tetikleyicisinin hatasız çalıştığını test et (4.2)."""
+        from tickets.webhooks import send_outgoing_webhook
+        # Tanımlı webhook URL olmasa dahi güvenli şekilde çalışmalı ve hata fırlatmamalı
+        try:
+            send_outgoing_webhook(self.ticket_tech, event_type="urgent_ticket_created")
+        except Exception as e:
+            self.fail(f"send_outgoing_webhook beklenmeyen hata fırlattı: {e}")
+
+
 
 

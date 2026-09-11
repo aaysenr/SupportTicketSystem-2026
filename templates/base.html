@@ -134,6 +134,11 @@
                 </ul>
                 <div class="d-flex align-items-center gap-2">
                     
+                    <!-- SESLİ BİLDİRİM (AUDIO) TOGGLE BUTONU -->
+                    <button id="audioToggle" class="btn btn-outline-light btn-sm border-0 me-1" type="button" title="Sesli Bildirimler (Açık/Kapalı)">
+                        <i class="bi bi-volume-up-fill" id="audioIcon"></i>
+                    </button>
+
                     <!-- KARANLIK TEMA (DARK MODE) TOGGLE BUTONU -->
                     <button id="themeToggle" class="btn btn-outline-light btn-sm border-0 me-1" type="button" title="Karanlık / Aydınlık Tema">
                         <i class="bi bi-moon-stars-fill" id="themeIcon"></i>
@@ -232,9 +237,91 @@
     <!-- Quill.js JS -->
     <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
 
-    <!-- Dark Mode Toggle Script -->
+    <!-- Dark Mode & Audio/Push Notification Scripts -->
     <script>
+        // ==========================================
+        // SESLİ UYARI (WEB AUDIO API) & PUSH BİLDİRİM MOTORU
+        // ==========================================
+        let appAudioCtx = null;
+
+        function isAudioNotificationsEnabled() {
+            return localStorage.getItem('audio_notifications') !== 'disabled';
+        }
+
+        function updateAudioIcon() {
+            const icon = document.getElementById('audioIcon');
+            if (icon) {
+                if (isAudioNotificationsEnabled()) {
+                    icon.className = 'bi bi-volume-up-fill text-white';
+                    icon.parentElement.setAttribute('title', 'Sesli Bildirimler Açık (Kapatmak için tıklayın)');
+                } else {
+                    icon.className = 'bi bi-volume-mute-fill text-white-50';
+                    icon.parentElement.setAttribute('title', 'Sesli Bildirimler Kapalı (Açmak için tıklayın)');
+                }
+            }
+        }
+
+        function playNotificationSound() {
+            if (!isAudioNotificationsEnabled()) return;
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return;
+                if (!appAudioCtx) {
+                    appAudioCtx = new AudioContextClass();
+                }
+                if (appAudioCtx.state === 'suspended') {
+                    appAudioCtx.resume();
+                }
+                const now = appAudioCtx.currentTime;
+                const osc = appAudioCtx.createOscillator();
+                const gain = appAudioCtx.createGain();
+
+                // Çift tonlu profesyonel ve hafif bildirim tınısı (Chime)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, now); // A5 (880 Hz)
+                osc.frequency.exponentialRampToValueAtTime(440, now + 0.16); // A4 (440 Hz)
+
+                gain.gain.setValueAtTime(0.18, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+                osc.connect(gain);
+                gain.connect(appAudioCtx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.18);
+            } catch (err) {
+                console.warn('Ses motoru başlatılamadı:', err);
+            }
+        }
+
+        function requestPushPermission() {
+            if ("Notification" in window && Notification.permission === "default") {
+                Notification.requestPermission();
+            }
+        }
+
+        function sendBrowserNotification(title, bodyText, targetUrl = null) {
+            if (!("Notification" in window)) return;
+            if (Notification.permission === "granted" && document.hidden) {
+                try {
+                    const notif = new Notification(title, {
+                        body: bodyText,
+                        icon: "https://cdn-icons-png.flaticon.com/512/1041/1041916.png"
+                    });
+                    if (targetUrl) {
+                        notif.onclick = function() {
+                            window.focus();
+                            window.location.href = targetUrl;
+                        };
+                    }
+                } catch (e) {
+                    console.warn('Tarayıcı bildirimi gönderilemedi:', e);
+                }
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
+            // 1. Tema Yönetimi
             const updateThemeIcon = (theme) => {
                 const icon = document.getElementById('themeIcon');
                 if (icon) {
@@ -259,6 +346,27 @@
                     updateThemeIcon(newTheme);
                 });
             }
+
+            // 2. Sesli Bildirim Yönetimi
+            updateAudioIcon();
+            const audioToggle = document.getElementById('audioToggle');
+            if (audioToggle) {
+                audioToggle.addEventListener('click', () => {
+                    requestPushPermission();
+                    if (isAudioNotificationsEnabled()) {
+                        localStorage.setItem('audio_notifications', 'disabled');
+                    } else {
+                        localStorage.setItem('audio_notifications', 'enabled');
+                        playNotificationSound(); // Kullanıcıya test sesi dinlet
+                    }
+                    updateAudioIcon();
+                });
+            }
+
+            // Sayfada herhangi bir tıklamada tarayıcı bildirim iznini iste (Kullanıcı etkileşimi kuralı)
+            document.addEventListener('click', () => {
+                requestPushPermission();
+            }, { once: true });
         });
     </script>
 </body>

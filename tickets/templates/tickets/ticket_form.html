@@ -64,6 +64,22 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
                         </div>
                     </div>
 
+                    <!-- AI Copilot Akıllı Kategori & Öncelik Asistanı -->
+                    <div id="aiCopilotBox" class="alert alert-primary bg-primary bg-opacity-10 border border-primary-subtle py-2 px-3 mb-3 rounded-3 d-none shadow-xs">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-primary text-white"><i class="bi bi-robot me-1"></i>AI Copilot</span>
+                                <span class="small text-dark">
+                                    <span id="aiCatSuggestionContainer" class="d-none me-2">Önerilen Kategori: <strong id="aiSuggestedCategory" class="text-primary"></strong></span>
+                                    <span id="aiPriSuggestionContainer" class="d-none">Öncelik: <strong id="aiSuggestedPriority" class="text-danger"></strong></span>
+                                </span>
+                            </div>
+                            <button type="button" id="btnApplyAiSuggestion" class="btn btn-sm btn-primary py-1 px-3 fw-semibold shadow-xs">
+                                <i class="bi bi-magic me-1"></i>Önerileri Uygula
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Kategori, Öncelik, Durum, Atanan Yönetici -->
                     <div class="row mb-3">
                         <div class="col-md-3">
@@ -244,6 +260,98 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
                             suggestionsBox.classList.add('d-none');
                         });
                 }, 300);
+            });
+        }
+
+        // AI Copilot Canlı Kategori ve Öncelik Asistanı
+        const categorySelect = document.getElementById('{{ form.category.id_for_label }}');
+        const prioritySelect = document.getElementById('{{ form.priority.id_for_label }}');
+        const aiCopilotBox = document.getElementById('aiCopilotBox');
+        const aiCatContainer = document.getElementById('aiCatSuggestionContainer');
+        const aiPriContainer = document.getElementById('aiPriSuggestionContainer');
+        const aiSuggestedCategory = document.getElementById('aiSuggestedCategory');
+        const aiSuggestedPriority = document.getElementById('aiSuggestedPriority');
+        const btnApplyAiSuggestion = document.getElementById('btnApplyAiSuggestion');
+
+        let aiDebounceTimer = null;
+        let lastSuggestedCatId = null;
+        let lastSuggestedPri = null;
+
+        function runAiCopilotAnalysis() {
+            const titleVal = titleInput ? titleInput.value.trim() : '';
+            const descVal = (quill && quill.getText) ? quill.getText().trim() : '';
+
+            if (titleVal.length < 3 && descVal.length < 5) {
+                if (aiCopilotBox) aiCopilotBox.classList.add('d-none');
+                return;
+            }
+
+            const queryParams = new URLSearchParams({
+                title: titleVal,
+                description: descVal
+            });
+
+            fetch(`/api/ai/suggest-meta/?${queryParams.toString()}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        let showBox = false;
+
+                        // Kategori önerisi kontrolü
+                        if (data.suggested_category_id && categorySelect && categorySelect.value != data.suggested_category_id) {
+                            lastSuggestedCatId = data.suggested_category_id;
+                            if (aiSuggestedCategory) aiSuggestedCategory.textContent = data.suggested_category_name;
+                            if (aiCatContainer) aiCatContainer.classList.remove('d-none');
+                            showBox = true;
+                        } else {
+                            if (aiCatContainer) aiCatContainer.classList.add('d-none');
+                        }
+
+                        // Öncelik önerisi kontrolü
+                        if (data.suggested_priority && prioritySelect && prioritySelect.value !== data.suggested_priority) {
+                            lastSuggestedPri = data.suggested_priority;
+                            if (aiSuggestedPriority) aiSuggestedPriority.textContent = data.suggested_priority_display;
+                            if (aiPriContainer) aiPriContainer.classList.remove('d-none');
+                            showBox = true;
+                        } else {
+                            if (aiPriContainer) aiPriContainer.classList.add('d-none');
+                        }
+
+                        if (showBox && aiCopilotBox) {
+                            aiCopilotBox.classList.remove('d-none');
+                        } else if (aiCopilotBox) {
+                            aiCopilotBox.classList.add('d-none');
+                        }
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function triggerAiDebounce() {
+            clearTimeout(aiDebounceTimer);
+            aiDebounceTimer = setTimeout(runAiCopilotAnalysis, 400);
+        }
+
+        if (titleInput) {
+            titleInput.addEventListener('input', triggerAiDebounce);
+        }
+        if (quill) {
+            quill.on('text-change', triggerAiDebounce);
+        }
+
+        if (btnApplyAiSuggestion) {
+            btnApplyAiSuggestion.addEventListener('click', function () {
+                if (lastSuggestedCatId && categorySelect) {
+                    categorySelect.value = lastSuggestedCatId;
+                    categorySelect.classList.add('is-valid');
+                }
+                if (lastSuggestedPri && prioritySelect) {
+                    prioritySelect.value = lastSuggestedPri;
+                    prioritySelect.classList.add('is-valid');
+                }
+                if (aiCopilotBox) {
+                    aiCopilotBox.classList.add('d-none');
+                }
             });
         }
     });

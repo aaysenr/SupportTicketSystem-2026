@@ -272,3 +272,13 @@ LOGGING = {
     },
 }
 
+# ==============================================================================
+# Harici Webhook & AI Copilot Entegrasyonları
+# ==============================================================================
+# Slack / Discord / Teams acil talep bildirim webhook URL'si (Boş bırakılırsa sessizce atlar)
+OUTGOING_WEBHOOK_URL = os.getenv("OUTGOING_WEBHOOK_URL", "")
+
+# AI Copilot (İsteğe bağlı OpenAI / LLM API anahtarı; boşsa yerel akıllı kural motoru çalışır)
+AI_COPILOT_API_KEY = os.getenv("AI_COPILOT_API_KEY", "")
+
+

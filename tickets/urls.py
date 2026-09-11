@@ -79,94 +79,14 @@ urlpatterns = [
     # Bildirim Toplu Okundu İşareti
     path('notifications/read-all/', views.mark_all_notifications_as_read, name='mark_all_notifications_read'),
 
-    # Raporlama ve Dışa Aktarma (Excel / CSV)
+    # Raporlama ve Dışa Aktarma (Excel / CSV & PDF)
     path('export/tickets/', views.export_tickets_csv, name='export_tickets_csv'),
+    path('ticket/<int:pk>/pdf/', views.export_ticket_pdf, name='export_ticket_pdf'),
+
+    # Yapay Zekâ Destekli Talep Asistanı (AI Copilot) API'leri
+    path('api/ai/suggest-meta/', views.ai_suggest_meta_api, name='ai_suggest_meta_api'),
+    path('api/ai/summarize/<int:pk>/', views.ai_summarize_ticket_api, name='ai_summarize_ticket_api'),
 
     # Toplu İşlemler (Bulk Actions)
     path('tickets/bulk-action/', views.bulk_ticket_action, name='bulk_ticket_action'),
-]
-
-
-"""
-from django.urls import path: Django'nun URL kalıplarını tanımlayan path fonksiyonunu içeri aktarır.
-
-from . import views: Bulunduğumuz klasördeki (.) views.py dosyasını projeye dahil eder ki oradaki fonksiyonlara erişebilelim.
-
-path('', views.ticket_list, name='ticket_list'):
-
-'' (Boş Tırnak): Kök dizini (ana adresi) temsil eder.
-
-views.ticket_list: Bu adrese girildiğinde views.py içindeki ticket_list fonksiyonunu tetikler.
-
-name='ticket_list': Bu adrese verilen özel koddur/takma addır. 
-
-İleride HTML içinde veya Python kodunda adresi elle (/) yazmak yerine {% url 'ticket_list' %} diyerek 
-dinamik olarak çağırabilmemizi sağlar.
-
-
-path('ticket/<int:pk>/', views.ticket_detail, name='ticket_detail'):
-ticket/<int:pk>/: Dinamik URL yapısıdır. URL'deki sayıyı yakalar.
-views.ticket_detail: Gelen sayıyı pk parametresi olarak alıp bu fonksiyonu tetikler.
-name='ticket_detail': Bu URL kuralına verilen takma isimdir. HTML şablonlarında {% url 'ticket_detail' ticket.id %} şeklinde dinamik link oluşturmamızı sağlar.
-
-
-
-
-path('ticket/new/', views.ticket_create, name='ticket_create'): 
-Tarayıcıdan [http://127.0.0.1:8000/ticket/new/](http://127.0.0.1:8000/ticket/new/) 
-adresine bir istek geldiğinde, views.py içerisindeki ticket_create fonksiyonunu tetikler.
- name='ticket_create' takma adı sayesinde HTML şablonlarında {% url 'ticket_create' %} yazarak bu sayfaya dinamik link verebiliriz.
-
-
-
-path('ticket/<int:pk>/edit/', views.ticket_edit, name='ticket_edit'):
-
-Tarayıcıdan gelen [http://127.0.0.1:8000/ticket/1/edit/](http://127.0.0.1:8000/ticket/1/edit/) gibi istekleri karşılar.
-
-<int:pk> parçası düzenlenecek talebin ID numarasını yakalar ve views.py içerisindeki ticket_edit(request, pk) fonksiyonuna aktarır.
-
-name='ticket_edit' takma adı sayesinde HTML şablonlarında {% url 'ticket_edit' ticket.id %} yazarak düzenleme sayfasına dinamik bağlantı vermeyi sağlar.
-
-
-
-URL Yapısının Sıralama Mantığı:
-
-ticket/new/: Sabit metin kuralı en üstte yer alır.
-
-ticket/<int:pk>/: Sadece sayısal ID içeren detay sayfalarını yakalar.
-
-ticket/<int:pk>/edit/: Sayısal ID ve ardından gelen /edit/ son ekini yakalayarak düzenleme ekranına yönlendirir. Çakışma olmadan her üç adres de bağımsız çalışır.
-
-
-
-# AUTH KISMI:
-path('register/', ... name='register'):
-
-Tarayıcıdan /register/ adresine gidildiğinde views.register_user çalışır ve register.html formunu ekrana basar.
-
-Şablonlarda {% url 'register' %} yazılarak dinamik link verilir.
-
-path('login/', ... name='login'):
-
-/login/ adresi views.login_user görünümünü tetikler. Kullanıcı adı ve şifre doğrulanır.
-
-@login_required ile kilitli bir sayfaya yetkisiz girildiğinde veya çıkış yapıldığında kullanıcı buraya yönlendirilir.
-
-path('logout/', ... name='logout'):
-
-/logout/ adresi oturumu sonlandırıp kullanıcıyı tekrar login ekranına atar
-
-
-
-
-Dinamik Parametre (<int:pk>): URL'deki sayısal ID'yi yakalar (Örn: /ticket/4/delete/ için pk=4) ve views.ticket_delete(request, pk) fonksiyonuna iletir.
-İsimlendirme:
- (name='ticket_delete'): Şablonlarda {% url 'ticket_delete' ticket.id %} şeklinde temiz, dinamik bağlantılar oluşturmayı sağlar.
- URL Sıralama Mantığı:
- ticket/new/ ---- Statik kural
- ticket/<int:pk>/ ----- Detay kuralı
- ticket/<int:pk>/edit/ ----- Düzenleme kuralı
- ticket/<int:pk>/delete/ ------- Silme onay kuralı
-
-
-"""
+]
