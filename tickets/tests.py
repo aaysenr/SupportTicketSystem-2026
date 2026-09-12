@@ -7,11 +7,12 @@ import json
 from io import StringIO
 from django.core.management import call_command
 from django.conf import settings
-from tickets.models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, Notification, ChatGroup, ChatMessage, EmailVerification, CannedResponse
+from tickets.models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, Notification, ChatGroup, ChatMessage, EmailVerification, CannedResponse, TicketActivityLog
 from tickets.validators import validate_file_security
 from tickets.totp import generate_totp_secret, get_totp_token, verify_totp_token
 from django.utils import timezone
 from datetime import timedelta
+from django.core.cache import cache
 
 
 class SecurityAndRBACWorkflowTests(TestCase):
@@ -1433,6 +1434,128 @@ class Stage4AndErrorPagesWorkflowTests(TestCase):
         cat_labels_staff = json.loads(res_staff.context['category_labels_json'])
         self.assertIn('Teknik', cat_labels_staff)
         self.assertNotIn('Finans', cat_labels_staff)
+
+
+class ArchitectureSecurityAndAccountDeletionTests(TestCase):
+    """
+    Yeni eklenen mimari ve kurumsal özelliklerin (ACID, Brute-force Login Koruması, Hesap Silme) testleri.
+    """
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='cust_audit',
+            email='cust@audit.test',
+            password='TestPassword123!',
+            first_name='Ali',
+            last_name='Yılmaz'
+        )
+        self.staff_user = User.objects.create_user(
+            username='staff_audit',
+            email='staff@audit.test',
+            password='StaffPassword123!',
+            is_staff=True,
+            first_name='Veli',
+            last_name='Demir'
+        )
+        self.superadmin = User.objects.create_superuser(
+            username='super_audit',
+            email='super@audit.test',
+            password='SuperPassword123!'
+        )
+        self.category = Category.objects.create(name='Genel Destek')
+        self.ticket = Ticket.objects.create(
+            title='İnceleme Talebi',
+            description='Test talebi içeriği',
+            created_by=self.user,
+            assigned_to=self.staff_user,
+            category=self.category,
+            status='open'
+        )
+        self.comment = TicketComment.objects.create(
+            ticket=self.ticket,
+            author=self.user,
+            content='Test kullanıcısı yorumu'
+        )
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_login_brute_force_protection(self):
+        """5 kez ardışık hatalı şifre denendiğinde IP kilitlenmeli ve giriş engellenmelidir."""
+        # 4 kez hatalı dene
+        for i in range(4):
+            res = self.client.post(reverse('login'), {'username': 'cust_audit', 'password': 'WrongPassword!'})
+            self.assertEqual(res.status_code, 200)
+            self.assertContains(res, 'Kalan deneme hakkı')
+
+        # 5. kez hatalı dene -> kilitleme tetiklenir
+        res5 = self.client.post(reverse('login'), {'username': 'cust_audit', 'password': 'WrongPassword!'})
+        self.assertEqual(res5.status_code, 200)
+        self.assertContains(res5, 'kilitlenmiştir')
+
+        # 6. kez DOĞRU şifre girilse dahi kilitli olduğu için giriş engellenmeli
+        res6 = self.client.post(reverse('login'), {'username': 'cust_audit', 'password': 'TestPassword123!'})
+        self.assertEqual(res6.status_code, 200)
+        self.assertContains(res6, 'kilitlenmiştir')
+
+    def test_delete_account_wrong_password_rejected(self):
+        """Yanlış şifre girildiğinde hesap silme işlemi iptal edilmelidir."""
+        self.client.login(username='cust_audit', password='TestPassword123!')
+        res = self.client.post(reverse('delete_account'), {'password': 'WrongPassword'})
+        self.assertRedirects(res, reverse('profile'))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_active)
+
+    def test_delete_account_user_preserves_tickets_and_comments(self):
+        """Müşteri hesabı silindiğinde veritabanındaki talepleri ve yorumları korunmalı, veriler anonimleştirilmelidir."""
+        self.client.login(username='cust_audit', password='TestPassword123!')
+        res = self.client.post(reverse('delete_account'), {'password': 'TestPassword123!'})
+        self.assertRedirects(res, reverse('login'))
+
+        self.user.refresh_from_db()
+        # Kullanıcı pasifleştirilmiş olmalı
+        self.assertFalse(self.user.is_active)
+        self.assertFalse(self.user.has_usable_password())
+        # Kişisel veriler anonimleştirilmiş olmalı
+        self.assertEqual(self.user.username, f"deleted_user_{self.user.id}")
+        self.assertEqual(self.user.email, f"deleted_{self.user.id}@anonymized.local")
+        self.assertEqual(self.user.first_name, "Silinmiş")
+
+        # Talep ve yorum hala veritabanında durmalı ve bu pasif kullanıcıya bağlı olmalı
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.created_by, self.user)
+        self.comment.refresh_from_db()
+        self.assertEqual(self.comment.author, self.user)
+
+    def test_delete_account_staff_reassigns_open_tickets(self):
+        """Yetkili hesabı silindiğinde açık talepler ortak havuza (None) aktarılmalıdır."""
+        self.client.login(username='staff_audit', password='StaffPassword123!')
+        res = self.client.post(reverse('delete_account'), {'password': 'StaffPassword123!'})
+        self.assertRedirects(res, reverse('login'))
+
+        self.staff_user.refresh_from_db()
+        self.assertFalse(self.staff_user.is_active)
+        self.assertFalse(self.staff_user.is_staff)
+
+        # Açık talep artık atanmamış olmalı
+        self.ticket.refresh_from_db()
+        self.assertIsNone(self.ticket.assigned_to)
+
+        # Aktivite kaydı düşülmüş olmalı
+        log = TicketActivityLog.objects.filter(ticket=self.ticket).first()
+        self.assertIsNotNone(log)
+        self.assertIn("ortak yetkili havuzuna aktarıldı", log.action)
+
+    def test_delete_account_sole_superadmin_blocked(self):
+        """Sistemdeki tek aktif süper yönetici hesabını silememelidir."""
+        self.client.login(username='super_audit', password='SuperPassword123!')
+        res = self.client.post(reverse('delete_account'), {'password': 'SuperPassword123!'})
+        self.assertRedirects(res, reverse('profile'))
+
+        self.superadmin.refresh_from_db()
+        self.assertTrue(self.superadmin.is_active)
+        self.assertTrue(self.superadmin.is_superuser)
+
 
 
 

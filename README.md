@@ -2,21 +2,29 @@
 
 Modern, yüksek güvenlikli, ölçeklenebilir ve kurumsal düzeyde bir **Django** tabanlı Destek Talep ve Müşteri Hizmetleri Yönetim Platformu.
 
-Bu sistem; kullanıcıların destek talepleri oluşturabildiği, güvenli dosya ekleri yükleyebildiği, departman bazlı atanmış personeller ile anlık sohbet edebildiği, **WebSocket ile canlı talep ve ekip mesajlaşması**, **WhatsApp tarzı zaman damgası ve düzenleme/silme kontrolleri**, **2FA (İki Aşamalı Doğrulama)**, **Microsoft Excel (.xlsx) & Resmi PDF Raporlama**, **Talep Birleştirme (Merge)**, **Dinamik Etiketleme (Tags)**, **Hazır Yanıt Şablonları (Canned Responses)**, **E-posta Webhook ile yanıtlama**, **Rol Tabanlı (RBAC) İstatistik Paneli**, **Gelişmiş CSAT Müşteri Değerlendirmeleri Filtreleme/Sıralama**, **SLA Takip Motoru** ve gerçek zamanlı bildirimlerin sunulduğu uçtan uca kurumsal bir çözümdür.
+Bu sistem; kullanıcıların destek talepleri oluşturabildiği, güvenli dosya ekleri yükleyebildiği, departman bazlı atanmış personeller ile anlık sohbet edebildiği, **WebSocket ile canlı talep ve ekip mesajlaşması**, **WhatsApp tarzı zaman damgası ve düzenleme/silme kontrolleri**, **2FA (İki Aşamalı Doğrulama)**, **Login Brute-Force Koruması**, **Kurumsal Hesap Silme (Soft-Delete & Anonimleştirme)**, **ACID Veri Bütünlüğü**, **Modüler Views Mimarisi**, **Microsoft Excel (.xlsx) & Resmi PDF Raporlama**, **Talep Birleştirme (Merge)**, **Dinamik Etiketleme (Tags)**, **Hazır Yanıt Şablonları (Canned Responses)**, **E-posta Webhook ile yanıtlama**, **Rol Tabanlı (RBAC) İstatistik Paneli**, **Gelişmiş CSAT Müşteri Değerlendirmeleri Filtreleme/Sıralama**, **SLA Takip Motoru** ve gerçek zamanlı bildirimlerin sunulduğu uçtan uca kurumsal bir çözümdür.
 
 ---
 
 ## 🌟 Öne Çıkan Özellikler ve Modüller
 
-### 1. 🛡️ Gelişmiş Güvenlik ve Doğrulama Mimarisi
+### 1. 🛡️ Gelişmiş Güvenlik, Doğrulama & Hesap Yönetimi Mimarisi
 - **İki Aşamalı Doğrulama (2FA - TOTP):** Standart Google Authenticator / Authy ile tam uyumlu, saf Python RFC 6238 TOTP motoru. Kullanıcılar profillerinden QR kod okutarak 2FA aktifleştirebilir; girişlerde şifre sonrası 6 haneli zaman damgalı doğrulama kodu sorulur.
+- **Giriş (Login) Brute-Force Koruması:** Standart `/login/` sayfası Django Cache üzerinden istemci IP bazlı hız sınırlamasıyla korunur. Kullanıcıya ilk 4 hatalı denemede kalan hakkı gösterilir; ardışık 5 başarısız denemede IP adresi **10 dakika süreyle kilitlenir**.
+- **Kurumsal Hesap Silme (Soft-Delete & KVKK/GDPR Uyumu):**
+  - Kullanıcılar ve yöneticiler Profil sayfasındaki *"Tehlikeli Bölge"* üzerinden hesaplarını şifre teyidiyle kapatabilir.
+  - **Klasik Veritabanı ve Arşiv Koruması:** Doğrudan hard-delete yapılmaz; açılan ve çözümlenen talepler, yorumlar, CSAT puanları ve SLA denetim kayıtları sistem tutarlılığı için korunur.
+  - Kullanıcı bilgileri anonimleştirilir (`deleted_user_<id>`, `deleted_<id>@anonymized.local`, "Silinmiş Kullanıcı"), parolası geçersiz kılınır (`set_unusable_password()`), oturumu kapatılır ve hesabı pasifleştirilir.
+  - Silinen personelin açıkta kalan talepleri sahipsiz kalmasın diye otomatik olarak ortak yetkili havuzuna (`assigned_to = None`) aktarılır ve sistem aktivite logu düşülür.
+  - **Son Süper Yönetici Koruması:** Sistemde en az bir aktif süper yönetici kalmalıdır; tek kalan süper yönetici hesabını silemez.
+- **Otomatik Disk ve Medya Temizliği:** Model sinyalleri (`pre_save` & `post_delete`) ile kullanıcı avatarı değiştirildiğinde veya silindiğinde eski fiziksel dosyalar sunucu diskinden otomatik olarak temizlenir.
 - **Şifre Sıfırlama & Konsol Geliştirici Desteği:** `CustomPasswordResetForm` sayesinde şifre sıfırlama bağlantıları hem e-posta ile iletilir hem de geliştirme/test ortamlarında terminale çerçeveli kutu olarak yazdırılarak anında test imkanı sağlar.
 - **Dosya Güvenliğinde Magic Bytes Denetimi:** Yalnızca dosya uzantısına güvenmek yerine dosya başlık baytları (Magic Signatures: PDF, PNG, JPG, ZIP vb.) ve Pillow derinlik analizi yapılır; uzantısı değiştirilmiş zararlı çalıştırılabilir kodlar (PHP, EXE vb.) engellenir.
 - **Stored & DOM XSS Koruması:** Zengin metin editöründen (Quill) gelen tüm HTML girdileri `nh3` HTML sanitization kütüphanesi ile filtrelenir. JavaScript betikleri, `onload`/`onerror` gibi olay dinleyicileri veritabanına ulaşmadan temizlenir.
 - **Korumalı Dosya İndirme & Dizin Aşımı Engeli:** Yüklenen ekler (`attachments`) doğrudan statik URL üzerinden halka açılmaz. Korumalı görünümler üzerinden sadece biletin sahibi, departman yetkilisi veya süper yönetici tarafından indirilebilir.
 - **Kriptografik OTP ve E-Posta Doğrulama:** 6 haneli hesap onay kodları `secrets` modülüyle üretilir; 10 dakika geçerlilik ve kaba kuvvet saldırılarına karşı **5 hatalı deneme sınırı** ile korunur.
 - **Gizli Yönetim Paneli ve Özel Hata Ara Katmanı:** Django admin paneli `/super-admin/` yolunda izole edilmiştir. `CustomErrorPageMiddleware` sayesinde `DEBUG=True` iken dahi sarı teknik rota listesi ekrana basılmaz; kullanıcı her zaman özel ve kurumsal `404.html`, `403.html` ve `500.html` sayfalarıyla karşılanır.
-- **12-Factor Ortam Değişkeni Desteği:** `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` ve SMTP bilgileri `python-dotenv` aracılığıyla `.env` dosyasından okunur.
+- **12-Factor Ortam Değişkeni Desteği:** `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, Redis ve SMTP bilgileri `python-dotenv` aracılığıyla `.env` dosyasından okunur.
 
 ### 2. ⚡ Gerçek Zamanlı İletişim & Ekip Sohbeti (WebSocket & Django Channels)
 - **Canlı Destek Talebi Mesajlaşması (Live Ticket Chat):** Destek talebinin detay sayfası Channels WebSocket (`TicketConsumer`) ile bağlanmıştır; müşteriler ve destek ekibi sayfayı yenilemeden anlık mesajlaşır.
@@ -49,7 +57,8 @@ Bu sistem; kullanıcıların destek talepleri oluşturabildiği, güvenli dosya 
   - Talep oluştururken en çok kullanılan ilk 10 etiketin önerilmesi, kullanıcıların özel etiket tanımlayabilmesi (talep başına en fazla 5 etiket, maks. 20 karakter).
   - Yöneticiler için merkezi etiket düzenleme ve silme API'leri (`edit_tag_api`, `delete_tag_api`).
 - **Toplu ve Tekil Talep Birleştirme (Merge Tickets):** Mükerrer açılan talepleri tek bir ana talep altında birleştirme, ikincil talepleri otomatik kapatma, etiketleri devretme ve denetim izi (`TicketActivityLog`) oluşturma.
-- **Toplu İşlemler (Bulk Actions):** Liste ekranından birden çok talebin durumunu, kategorisini veya atanan yöneticisini tek seferde güncelleme.
+- **ACID Veri Bütünlüğü (Atomik İşlemler):** Talep birleştirme ve toplu güncelleme işlemleri `@transaction.atomic` ile korunur; kesintilerde yarım kalan veri riski ortadan kaldırılmıştır.
+- **Filtre Korumalı Dinamik Sayfalama (Pagination):** Kategori, personel ve etiket filtreleri sayfa değiştirildiğinde korunur.
 
 ### 5. ⏱️ SLA (Hizmet Seviyesi Anlaşması) Takip Motoru
 - Öncelik seviyesine göre dinamik mesai saati (09:00 - 18:00) ve ilk yanıt süresi takibi:
@@ -76,7 +85,7 @@ Bu sistem; kullanıcıların destek talepleri oluşturabildiği, güvenli dosya 
 | Katman | Teknoloji / Kütüphane | Sürüm |
 | :--- | :--- | :--- |
 | **Backend Framework** | Python 3.11+, Django | 6.1 |
-| **Asenkron / WebSocket** | Django Channels, Daphne, Twisted, Autobahn | 4.3.2 / 4.2.3 |
+| **Asenkron / WebSocket** | Django Channels, Channels Redis, Daphne, Twisted | 4.3.2 / >=4.2.0 / 4.2.3 |
 | **Raporlama & Dosya** | `openpyxl` (Excel), `reportlab` (PDF), `Pillow` | 3.1.5 / 5.0.1 / 12.3.0 |
 | **Güvenlik & Doğrulama** | `nh3` (HTML Sanitizer), `qrcode` (2FA TOTP), `cryptography` | 0.3.7 / 8.2 / 50.0.1 |
 | **Form Doğrulama & Captcha** | `django-simple-captcha` | 0.7.0 |
@@ -106,11 +115,23 @@ Support Ticket System/
 │   ├── copilot.py              # Akıllı Kategori/Öncelik Sezgisel Motoru & Özetleyici
 │   ├── webhooks.py             # Slack / Discord Asenkron Acil Durum Webhook İstemcisi
 │   ├── routing.py              # WebSocket URL rotaları
-│   ├── tests.py                # 67 Kapsamlı Otomasyon & Güvenlik Testi (%100 Başarı)
+│   ├── tests.py                # 72 Kapsamlı Otomasyon & Güvenlik Testi (%100 Başarı)
 │   ├── totp.py                 # RFC 6238 TOTP 2FA ve QR Kod Motoru
 │   ├── urls.py                 # Uygulama içi rotalar ve API uç noktaları
 │   ├── validators.py           # Magic bytes dosya imza ve boyut doğrulayıcıları
-│   ├── views.py                # RBAC, Ticket, Auth, 2FA, Excel, Merge ve REST API Görünümleri
+│   │
+│   ├── views/                  # Modüler Görünüm Katmanı (Clean Architecture)
+│   │   ├── __init__.py         # Tüm görünümleri dışa aktaran modüler köprü
+│   │   ├── common.py           # Asenkron e-posta kuyruğu ve ortak yardımcılar
+│   │   ├── auth_views.py       # Login (Brute-Force korumalı), 2FA, Profil, Hesap Silme
+│   │   ├── ticket_views.py     # Ticket CRUD, Yorumlar, Ekler, Bulk Action & Merge (ACID)
+│   │   ├── chat_views.py       # Canlı Takım Sohbeti, DM, Arşiv ve Mesajlaşma API'leri
+│   │   ├── dashboard_views.py  # RBAC Yönetici Gösterge Paneli, Excel/PDF/CSV Raporları
+│   │   ├── notification_views.py # Bildirim Listesi, Okundu/Silme İşlemleri
+│   │   ├── kb_views.py         # Bilgi Bankası (SSS) Makaleleri ve Canlı Arama
+│   │   ├── api_views.py        # Webhook, CSAT Rating, Hazır Şablonlar, Etiket CRUD
+│   │   └── error_views.py      # Özel 404, 403 ve 500 Hata Görünümleri
+│   │
 │   ├── management/commands/    # Özel CLI komutları (örn: send_test_email)
 │   └── templates/              # Jinja2 / Django HTML ve E-posta Şablonları
 │       ├── emails/             # Zengin HTML e-posta bildirim şablonları
@@ -179,7 +200,7 @@ Tarayıcınızdan `http://127.0.0.1:8000/` adresine giderek sistemi kullanmaya b
 
 ## 🧪 Test Süiti ve Doğrulama
 
-Sistem; yetkilendirme, RBAC dashboard ayrımı, güvenlik açıkları, 2FA TOTP akışları, Magic Bytes filtreleri, SLA tatil hesaplamaları, XSS engellemeleri, Excel/PDF dışa aktarma, bilet birleştirme, bildirim silme, etiket yönetimi, konsol şifre sıfırlama çıktısı ve WebSocket API'lerini denetleyen **67 kapsamlı birim ve entegrasyon testine** sahiptir:
+Sistem; yetkilendirme, RBAC dashboard ayrımı, güvenlik açıkları, 2FA TOTP akışları, Magic Bytes filtreleri, SLA tatil hesaplamaları, XSS engellemeleri, Excel/PDF dışa aktarma, bilet birleştirme, bildirim silme, etiket yönetimi, konsol şifre sıfırlama çıktısı, login brute-force koruması, hesap silme ve WebSocket API'lerini denetleyen **72 kapsamlı birim ve entegrasyon testine** sahiptir:
 
 ```bash
 python manage.py test tickets.tests
@@ -188,11 +209,11 @@ python manage.py test tickets.tests
 Konsol çıktısı:
 ```text
 Creating test database for alias 'default'...
-...................................................................
+........................................................................
 ----------------------------------------------------------------------
-Ran 67 tests in 181.274s
+Ran 72 tests in 186.346s
 
-OK (67/67 - %100 Başarı)
+OK (72/72 - %100 Başarı)
 Destroying test database for alias 'default'...
 ```
 

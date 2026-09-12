@@ -568,7 +568,7 @@ class UserProfile(models.Model):
         return self.assigned_categories.filter(id=category.id).exists()
 
 
-from django.db.models.signals import post_save, post_delete
+from django.db.models.signals import post_save, post_delete, pre_save
 from django.dispatch import receiver
 
 @receiver(post_save, sender=User)
@@ -602,6 +602,19 @@ def delete_avatar_on_delete(sender, instance, **kwargs):
     """Kullanıcı profili silindiğinde fiziksel avatar dosyasını diskten temizler"""
     if instance.avatar and instance.avatar.name:
         instance.avatar.delete(save=False)
+
+
+@receiver(pre_save, sender=UserProfile)
+def delete_old_avatar_on_change(sender, instance, **kwargs):
+    """Kullanıcı profil fotoğrafını değiştirdiğinde veya kaldırdığında eski görseli diskten temizler"""
+    if not instance.pk:
+        return
+    try:
+        old_profile = UserProfile.objects.get(pk=instance.pk)
+        if old_profile.avatar and old_profile.avatar != instance.avatar:
+            old_profile.avatar.delete(save=False)
+    except UserProfile.DoesNotExist:
+        pass
 
 
 

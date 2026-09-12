@@ -432,7 +432,7 @@
     <ul class="pagination shadow-sm">
         {% if page_obj.has_previous %}
         <li class="page-item">
-            <a class="page-item page-link" href="?page={{ page_obj.previous_page_number }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if filter_mine %}&mine=1{% endif %}">
+            <a class="page-item page-link" href="?page={{ page_obj.previous_page_number }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_assigned %}&assigned_to={{ selected_assigned }}{% endif %}{% if selected_tag %}&tag={{ selected_tag }}{% endif %}{% if filter_mine %}&mine=1{% endif %}">
                 <i class="bi bi-chevron-left me-1"></i>Önceki
             </a>
         </li>
@@ -449,14 +449,14 @@
             </li>
             {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
             <li class="page-item">
-                <a class="page-link" href="?page={{ num }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if filter_mine %}&mine=1{% endif %}">{{ num }}</a>
+                <a class="page-link" href="?page={{ num }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_assigned %}&assigned_to={{ selected_assigned }}{% endif %}{% if selected_tag %}&tag={{ selected_tag }}{% endif %}{% if filter_mine %}&mine=1{% endif %}">{{ num }}</a>
             </li>
             {% endif %}
         {% endfor %}
 
         {% if page_obj.has_next %}
         <li class="page-item">
-            <a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if filter_mine %}&mine=1{% endif %}">
+            <a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ search_query }}&status={{ selected_status }}&priority={{ selected_priority }}&sort={{ selected_sort }}&solution={{ selected_solution }}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_assigned %}&assigned_to={{ selected_assigned }}{% endif %}{% if selected_tag %}&tag={{ selected_tag }}{% endif %}{% if filter_mine %}&mine=1{% endif %}">
                 Sonraki<i class="bi bi-chevron-right ms-1"></i>
             </a>
         </li>

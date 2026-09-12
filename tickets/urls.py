@@ -12,6 +12,7 @@ urlpatterns = [
     # Profil ve Şifre İşlemleri
     path('profile/', views.profile_view, name='profile'),
     path('profile/password/', views.change_password_view, name='change_password'),
+    path('profile/delete-account/', views.delete_account_view, name='delete_account'),
 
 
     # Kullanıcı Kimlik Doğrulama (Auth) İşlemleri
