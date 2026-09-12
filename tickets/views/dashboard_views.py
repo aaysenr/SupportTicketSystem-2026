@@ -271,7 +271,9 @@ def _get_filtered_tickets_qs(request):
     status = request.GET.get('status', '').strip()
     priority = request.GET.get('priority', '').strip()
     category_id = request.GET.get('category', '').strip()
+    assigned_to = request.GET.get('assigned_to', '').strip()
     tag = request.GET.get('tag', '').strip()
+    solution = request.GET.get('solution', 'all').strip()
     mine = request.GET.get('mine') == '1'
 
     tickets = base_qs
@@ -283,8 +285,17 @@ def _get_filtered_tickets_qs(request):
         tickets = tickets.filter(priority=priority)
     if category_id:
         tickets = tickets.filter(category_id=category_id)
+    if assigned_to:
+        if assigned_to == 'unassigned':
+            tickets = tickets.filter(assigned_to__isnull=True)
+        else:
+            tickets = tickets.filter(assigned_to_id=assigned_to)
     if tag:
         tickets = tickets.filter(Q(tags__slug=tag) | Q(tags__name=tag)).distinct()
+    if solution == 'solved':
+        tickets = tickets.filter(Q(status='resolved') | Q(comments__is_solution=True)).distinct()
+    elif solution == 'unsolved':
+        tickets = tickets.exclude(status='resolved').exclude(comments__is_solution=True).distinct()
     if mine:
         tickets = tickets.filter(created_by=request.user)
 
