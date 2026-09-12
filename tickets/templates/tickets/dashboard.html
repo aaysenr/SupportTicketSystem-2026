@@ -14,8 +14,19 @@
                 <i class="bi bi-graph-up-arrow fs-3"></i>
             </div>
             <div>
-                <h2 class="h4 fw-bold text-dark mb-1">Yönetici İstatistik ve Analiz Paneli</h2>
-                <p class="text-muted small mb-0">Destek sisteminizin anlık durum, kategori ve öncelik analizleri</p>
+                <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
+                    <h2 class="h4 fw-bold text-dark mb-0">Yönetici İstatistik ve Analiz Paneli</h2>
+                    {% if is_superadmin %}
+                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-2.5 py-1 small" title="Tüm sistem verileri genel olarak analiz edilmektedir.">
+                            <i class="bi bi-shield-check me-1"></i>Genel Sistem Analizi (Tüm Talepler)
+                        </span>
+                    {% else %}
+                        <span class="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2.5 py-1 small" title="Sorumlu olduğunuz departman/kategoriler ve size atanan talepler analiz edilmektedir.">
+                            <i class="bi bi-person-workspace me-1"></i>Kategori ve Atanan Talepler Analizi
+                        </span>
+                    {% endif %}
+                </div>
+                <p class="text-muted small mb-0">{% if is_superadmin %}Sistem genelindeki tüm taleplerin anlık durum, kategori, öncelik ve memnuniyet analizleri{% else %}Sorumlu olduğunuz kategoriler ve size atanan taleplerin anlık durum, kategori ve öncelik analizleri{% endif %}</p>
             </div>
         </div>
         <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -240,9 +251,184 @@
     </div>
 </div>
 
+{% if is_superadmin %}
+<!-- MÜŞTERİ DEĞERLENDİRMELERİ VE GERİ BİLDİRİMLER TABLOSU (Sadece Süper Adminler) -->
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-0 rounded-4" id="csatFeedbackCard">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-1 fw-bold text-gray-800 d-flex align-items-center">
+                        <i class="bi bi-chat-heart-fill text-danger me-2"></i>Müşteri Değerlendirmeleri ve Geri Bildirimler
+                    </h5>
+                    <p class="text-muted small mb-0">Kullanıcıların tamamlanan talepler için verdiği puanlar ve yorumlar</p>
+                </div>
+                <!-- Duygu Durumu Filtre Butonları -->
+                <div class="btn-group btn-group-sm rounded-pill p-1 bg-light border" role="group" id="csatSentimentFilters">
+                    <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 active" data-filter="all">Tümü ({{ csat_ratings|length }})</button>
+                    <button type="button" class="btn btn-sm btn-light rounded-pill px-3 text-success fw-semibold" data-filter="positive">
+                        <i class="bi bi-emoji-smile me-1"></i>Olumlu (4-5 ★)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-light rounded-pill px-3 text-warning fw-semibold" data-filter="neutral">
+                        <i class="bi bi-emoji-neutral me-1"></i>Nötr (3 ★)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-light rounded-pill px-3 text-danger fw-semibold" data-filter="negative">
+                        <i class="bi bi-emoji-frown me-1"></i>Olumsuz (1-2 ★)
+                    </button>
+                </div>
+            </div>
+
+            <!-- GELİŞMİŞ FİLTRELEME VE SIRALAMA FORMU (Atanan Temsilci, Talep No, Müşteri No, Tarih Sıralaması) -->
+            <div class="card-body bg-light-subtle border-bottom py-2.5 px-3">
+                <form method="GET" action="{% url 'admin_dashboard' %}#csatFeedbackCard" class="row g-2 align-items-center" id="csatFilterForm">
+                    <div class="col-md-3 col-sm-6">
+                        <label class="form-label small fw-bold text-muted mb-1 text-nowrap">
+                            <i class="bi bi-person-check me-1"></i>Atanan Temsilci
+                        </label>
+                        <select name="csat_assigned" class="form-select form-select-sm">
+                            <option value="">Tüm Temsilciler</option>
+                            <option value="unassigned" {% if csat_assigned == 'unassigned' %}selected{% endif %}>Atanmamış</option>
+                            {% for st in staff_users %}
+                            <option value="{{ st.id }}" {% if csat_assigned == st.id|stringformat:"s" %}selected{% endif %}>
+                                {{ st.get_full_name|default:st.username }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-md-3 col-sm-6">
+                        <label class="form-label small fw-bold text-muted mb-1 text-nowrap">
+                            <i class="bi bi-hash me-1"></i>Talep ID No / Başlık
+                        </label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" name="csat_ticket_id" class="form-control form-control-sm" placeholder="Örn: 10 veya DES-00010" value="{{ csat_ticket_id }}">
+                        </div>
+                    </div>
+
+                    <div class="col-md-3 col-sm-6">
+                        <label class="form-label small fw-bold text-muted mb-1 text-nowrap">
+                            <i class="bi bi-person-badge me-1"></i>Müşteri Kullanıcı No / Adı
+                        </label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" name="csat_user_id" class="form-control form-control-sm" placeholder="Müşteri ID, kullanıcı adı veya e-posta" value="{{ csat_user_id }}">
+                        </div>
+                    </div>
+
+                    <div class="col-md-2 col-sm-4">
+                        <label class="form-label small fw-bold text-muted mb-1 text-nowrap">
+                            <i class="bi bi-sort-down me-1"></i>Tarih Sıralaması
+                        </label>
+                        <select name="csat_sort" class="form-select form-select-sm">
+                            <option value="newest" {% if csat_sort == 'newest' %}selected{% endif %}>En Yeni Tarihe Göre</option>
+                            <option value="oldest" {% if csat_sort == 'oldest' %}selected{% endif %}>En Eski Tarihe Göre</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-1 col-sm-2 d-flex align-items-end gap-1 mt-auto">
+                        <button type="submit" class="btn btn-sm btn-primary w-100 fw-semibold" title="Filtrele">
+                            <i class="bi bi-funnel-fill"></i>
+                        </button>
+                        {% if csat_assigned or csat_ticket_id or csat_user_id or csat_sort != 'newest' %}
+                        <a href="{% url 'admin_dashboard' %}#csatFeedbackCard" class="btn btn-sm btn-outline-secondary" title="Filtreyi Temizle">
+                            <i class="bi bi-x-lg"></i>
+                        </a>
+                        {% endif %}
+                    </div>
+                </form>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="csatFeedbackTable">
+                    <thead class="table-light">
+                        <tr class="small text-muted text-uppercase">
+                            <th class="ps-4">Talep</th>
+                            <th>Müşteri</th>
+                            <th>Atanan Temsilci</th>
+                            <th>Puan</th>
+                            <th style="min-width: 250px;">Müşteri Yorumu</th>
+                            <th class="pe-4 text-end">Tarih</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in csat_ratings %}
+                        <tr class="csat-row" data-score="{{ r.score }}" data-sentiment="{% if r.score >= 4 %}positive{% elif r.score == 3 %}neutral{% else %}negative{% endif %}">
+                            <td class="ps-4">
+                                <a href="{% url 'ticket_detail' r.ticket.id %}" class="fw-bold text-decoration-none text-dark d-block text-truncate" style="max-width: 220px;">
+                                    #{{ r.ticket.ticket_number }} - {{ r.ticket.title }}
+                                </a>
+                                <small class="text-muted">{{ r.ticket.category.name|default:'Genel' }}</small>
+                            </td>
+                            <td>
+                                <div class="fw-semibold small">
+                                    {{ r.user.get_full_name|default:r.user.username }}
+                                    <span class="badge bg-secondary-subtle text-secondary border rounded-pill px-1.5 py-0.5 ms-1" style="font-size: 0.68rem;" title="Müşteri Kullanıcı No">#{{ r.user.id }}</span>
+                                </div>
+                                <small class="text-muted">{{ r.user.email }}</small>
+                            </td>
+                            <td>
+                                {% if r.ticket.assigned_to %}
+                                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-2 py-1 small">
+                                        <i class="bi bi-person-check me-1"></i>{{ r.ticket.assigned_to.get_full_name|default:r.ticket.assigned_to.username }}
+                                    </span>
+                                {% else %}
+                                    <span class="text-muted small">Atanmamış</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if r.score >= 4 %}
+                                    <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2.5 py-1 fw-bold">
+                                        <i class="bi bi-star-fill text-warning me-1"></i>{{ r.score }} / 5
+                                    </span>
+                                {% elif r.score == 3 %}
+                                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle rounded-pill px-2.5 py-1 fw-bold">
+                                        <i class="bi bi-star-fill text-warning me-1"></i>{{ r.score }} / 5
+                                    </span>
+                                {% else %}
+                                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-2.5 py-1 fw-bold">
+                                        <i class="bi bi-star-fill text-warning me-1"></i>{{ r.score }} / 5
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if r.feedback %}
+                                    <span class="small text-dark text-break">"{{ r.feedback }}"</span>
+                                {% else %}
+                                    <span class="small text-muted fst-italic">Yorum bırakılmadı.</span>
+                                {% endif %}
+                            </td>
+                            <td class="pe-4 text-end text-muted small text-nowrap">
+                                {{ r.created_at|date:"d.m.Y H:i" }}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr id="emptyCsatRow">
+                            <td colspan="6" class="text-center py-5 text-muted">
+                                <i class="bi bi-chat-square-heart display-5 d-block mb-2 opacity-50"></i>
+                                Henüz müşteri değerlendirmesi bulunmuyor.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        <tr id="noSentimentMatchRow" class="d-none">
+                            <td colspan="6" class="text-center py-4 text-muted small">
+                                <i class="bi bi-filter-circle me-1"></i> Seçilen duygu filtresine uygun değerlendirme bulunamadı.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- CHART.JS SCRIPT TANIMLAMASI -->
 <script>
     document.addEventListener("DOMContentLoaded", function() {
+        if (typeof Chart === 'undefined') {
+            console.error('Chart.js yüklenemedi.');
+            return;
+        }
+
         // 1. Kategori Dağılım Grafiği (Doughnut)
         let categoryLabels = {{ category_labels_json|safe }};
         let categoryCounts = {{ category_counts_json|safe }};
@@ -252,114 +438,169 @@
             categoryCounts = [0];
         }
 
-        const ctxCat = document.getElementById('categoryChart').getContext('2d');
-        new Chart(ctxCat, {
-            type: 'doughnut',
-            data: {
-                labels: categoryLabels,
-                datasets: [{
-                    data: categoryCounts,
-                    backgroundColor: [
-                        '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796'
-                    ],
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom' }
+        const catCanvas = document.getElementById('categoryChart');
+        if (catCanvas) {
+            new Chart(catCanvas.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: categoryLabels,
+                    datasets: [{
+                        data: categoryCounts,
+                        backgroundColor: [
+                            '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796'
+                        ],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
                 }
-            }
-        });
+            });
+        }
 
         // 2. Öncelik Dağılım Grafiği (Bar)
         const priorityLabels = {{ priority_labels_json|safe }};
         const priorityCounts = {{ priority_counts_json|safe }};
 
-        const ctxPrio = document.getElementById('priorityChart').getContext('2d');
-        new Chart(ctxPrio, {
-            type: 'bar',
-            data: {
-                labels: priorityLabels,
-                datasets: [{
-                    label: 'Talep Sayısı',
-                    data: priorityCounts,
-                    backgroundColor: [
-                        '#36b9cc', // Düşük (Mavi)
-                        '#f6c23e', // Orta (Sarı)
-                        '#fd7e14', // Yüksek (Turuncu)
-                        '#e74a3b'  // Acil (Kırmızı)
-                    ],
-                    borderRadius: 6
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
+        const prioCanvas = document.getElementById('priorityChart');
+        if (prioCanvas) {
+            new Chart(prioCanvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: priorityLabels,
+                    datasets: [{
+                        label: 'Talep Sayısı',
+                        data: priorityCounts,
+                        backgroundColor: [
+                            '#36b9cc', // Düşük (Mavi)
+                            '#f6c23e', // Orta (Sarı)
+                            '#fd7e14', // Yüksek (Turuncu)
+                            '#e74a3b'  // Acil (Kırmızı)
+                        ],
+                        borderRadius: 6
+                    }]
                 },
-                scales: {
-                    y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    }
                 }
-            }
-        });
+            });
+        }
 
         // 3. Aylık CSAT Trend Çizgi Grafiği (Line Chart)
         const csatTrendLabels = {{ csat_trend_labels_json|safe }};
         const csatTrendValues = {{ csat_trend_values_json|safe }};
 
-        const ctxCsat = document.getElementById('csatTrendChart').getContext('2d');
-        new Chart(ctxCsat, {
-            type: 'line',
-            data: {
-                labels: csatTrendLabels,
-                datasets: [{
-                    label: 'Ortalama CSAT Puanı',
-                    data: csatTrendValues,
-                    borderColor: '#f6c23e',
-                    backgroundColor: 'rgba(246, 194, 62, 0.15)',
-                    borderWidth: 3,
-                    fill: true,
-                    tension: 0.35,
-                    pointBackgroundColor: '#f6c23e',
-                    pointBorderColor: '#ffffff',
-                    pointBorderWidth: 2,
-                    pointRadius: 6,
-                    pointHoverRadius: 8
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return 'Ortalama Puan: ' + context.parsed.y + ' / 5.0';
+        const csatCanvas = document.getElementById('csatTrendChart');
+        if (csatCanvas) {
+            new Chart(csatCanvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: csatTrendLabels,
+                    datasets: [{
+                        label: 'Ortalama CSAT Puanı',
+                        data: csatTrendValues,
+                        borderColor: '#f6c23e',
+                        backgroundColor: 'rgba(246, 194, 62, 0.15)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.35,
+                        pointBackgroundColor: '#f6c23e',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 6,
+                        pointHoverRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Ortalama Puan: ' + context.parsed.y + ' / 5.0';
+                                }
                             }
                         }
-                    }
-                },
-                scales: {
-                    y: {
-                        min: 0,
-                        max: 5,
-                        ticks: {
-                            stepSize: 1,
-                            callback: function(val) { return val + ' ★'; }
-                        },
-                        grid: { color: 'rgba(0, 0, 0, 0.05)' }
                     },
-                    x: {
-                        grid: { display: false }
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 5,
+                            ticks: {
+                                stepSize: 1,
+                                callback: function(val) { return val + ' ★'; }
+                            },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        },
+                        x: {
+                            grid: { display: false }
+                        }
                     }
                 }
+            });
+        }
+
+        // 4. CSAT Müşteri Geri Bildirim Tablosu Filtreleme (Sadece Süper Adminler)
+        const csatFilterButtons = document.querySelectorAll('#csatSentimentFilters button');
+        const csatRows = document.querySelectorAll('#csatFeedbackTable tbody tr.csat-row');
+        const noMatchRow = document.getElementById('noSentimentMatchRow');
+
+        if (csatFilterButtons && csatFilterButtons.length > 0) {
+            csatFilterButtons.forEach(btn => {
+                btn.addEventListener('click', function () {
+                    csatFilterButtons.forEach(b => {
+                        b.classList.remove('btn-primary', 'active');
+                        b.classList.add('btn-light');
+                    });
+                    this.classList.remove('btn-light');
+                    this.classList.add('btn-primary', 'active');
+
+                    const filter = this.getAttribute('data-filter');
+                    let visibleCount = 0;
+
+                    csatRows.forEach(row => {
+                        const sentiment = row.getAttribute('data-sentiment');
+                        if (filter === 'all' || sentiment === filter) {
+                            row.classList.remove('d-none');
+                            visibleCount++;
+                        } else {
+                            row.classList.add('d-none');
+                        }
+                    });
+
+                    if (noMatchRow) {
+                        if (visibleCount === 0 && csatRows.length > 0) {
+                            noMatchRow.classList.remove('d-none');
+                        } else {
+                            noMatchRow.classList.add('d-none');
+                        }
+                    }
+                });
+            });
+        }
+
+        // Sayfa yüklendiğinde CSAT filtresi veya anchor varsa doğrudan oraya kaydır
+        if (window.location.hash === '#csatFeedbackCard' || window.location.search.includes('csat_')) {
+            const csatCard = document.getElementById('csatFeedbackCard');
+            if (csatCard) {
+                setTimeout(() => {
+                    csatCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
             }
-        });
+        }
     });
 </script>
 {% endblock %}

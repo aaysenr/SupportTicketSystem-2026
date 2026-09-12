@@ -19,7 +19,7 @@
 
         {% if user.is_staff %}
             {% if not ticket.merged_into %}
-            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#mergeTicketModal" title="Bu talebi başka bir mükerrer talep ile birleştir">
+            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#mergeTicketModal" title="Bu talebi tekrarlanan başka bir talep ile birleştir">
                 <i class="bi bi-intersect me-1"></i> Talebi Birleştir
             </button>
             {% endif %}
@@ -71,7 +71,7 @@
 <div class="alert alert-info border-info-subtle bg-info-subtle shadow-sm rounded-3 d-flex align-items-center gap-3 mb-4" role="alert">
     <i class="bi bi-intersect fs-3 text-info"></i>
     <div>
-        <h6 class="fw-bold mb-1 text-info-emphasis">Birleştirilmiş Mükerrer Talepler ({{ ticket.merged_tickets.count }})</h6>
+        <h6 class="fw-bold mb-1 text-info-emphasis">Birleştirilmiş Tekrarlanan Talepler ({{ ticket.merged_tickets.count }})</h6>
         <div class="d-flex flex-wrap gap-2 mt-1">
             {% for m in ticket.merged_tickets.all %}
             <a href="{% url 'ticket_detail' m.id %}" class="badge bg-white text-info-emphasis border border-info-subtle py-2 px-3 text-decoration-none shadow-xs">
@@ -795,7 +795,7 @@
         <div class="modal-content border-0 shadow">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title fw-bold" id="mergeTicketModalLabel">
-                    <i class="bi bi-intersect me-2"></i>Talebi Birleştir (Merge)
+                    <i class="bi bi-intersect me-2"></i>Talebi Birleştir
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
             </div>
@@ -814,7 +814,7 @@
                     <div class="mb-3">
                         <label for="secondary_ticket_id" class="form-label fw-bold small text-muted">Bu Talebe Birleştirilecek İkincil Talep ID'si</label>
                         <input type="number" class="form-control" id="secondary_ticket_id" name="secondary_ticket_id" placeholder="Örn: 12" required min="1">
-                        <div class="form-text small">Kapatılarak bu talebe dahil edilecek mükerrer talebin ID numarasını giriniz.</div>
+                        <div class="form-text small">Kapatılarak bu talebe dahil edilecek tekrarlanan talebin ID numarasını giriniz.</div>
                     </div>
                 </div>
                 <div class="modal-footer bg-light">

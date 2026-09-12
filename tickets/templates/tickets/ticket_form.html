@@ -11,16 +11,19 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-8">
-        <div class="mb-3">
+        <div class="mb-3 d-flex justify-content-between align-items-center">
             {% if ticket %}
-            <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-outline-secondary btn-sm">
+            <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
                 <i class="bi bi-arrow-left me-1"></i> Talebe Dön
             </a>
             {% else %}
-            <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm">
+            <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
                 <i class="bi bi-arrow-left me-1"></i> Listeye Dön
             </a>
             {% endif %}
+            <a href="{% url 'knowledge_base' %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-semibold">
+                <i class="bi bi-book-half me-1"></i> Bilgi Bankasına (SSS) Dön
+            </a>
         </div>
 
         <div class="card shadow-sm">
@@ -127,20 +130,41 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
                     <!-- Talep Etiketleri (Tags) -->
                     {% if form.tags %}
                     <div class="mb-3">
-                        <label class="form-label fw-bold d-block">
-                            <i class="bi bi-tags-fill me-1 text-primary"></i>{{ form.tags.label }}
-                        </label>
-                        <div class="d-flex flex-wrap gap-3 p-3 bg-light rounded-3 border">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label fw-bold mb-0">
+                                <i class="bi bi-tags-fill me-1 text-primary"></i>{{ form.tags.label }}
+                                <span class="badge bg-primary-subtle text-primary border ms-2" id="tagCountBadge">0 / 5 Seçildi</span>
+                            </label>
+                            <div class="d-flex gap-2">
+                                {% if user.is_staff %}
+                                <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 py-1" data-bs-toggle="modal" data-bs-target="#manageTagsModal" id="btnOpenManageTags" style="font-size: 0.8rem;">
+                                    <i class="bi bi-gear-fill me-1"></i> Etiketleri Yönet
+                                </button>
+                                {% endif %}
+                                <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1" data-bs-toggle="modal" data-bs-target="#newTagModal" style="font-size: 0.8rem;">
+                                    <i class="bi bi-plus-circle-fill me-1"></i> Yeni Etiket Tanımla
+                                </button>
+                            </div>
+                        </div>
+                        <div class="text-muted small mb-2">
+                            <i class="bi bi-info-circle me-1"></i> En çok kullanılan etiketlerden seçebilir veya yenisini ekleyebilirsiniz (En fazla 5 etiket seçilebilir, maksimum 20 karakter).
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 p-3 bg-light rounded-3 border" id="tagsContainer">
                             {% for checkbox in form.tags %}
-                            <div class="form-check">
+                            <div class="form-check tag-item-badge d-flex align-items-center bg-white border rounded-pill px-3 py-1.5 shadow-xs mb-1 transition-all" style="cursor: pointer;">
                                 {{ checkbox.tag }}
-                                <label class="form-check-label small fw-semibold" for="{{ checkbox.id_for_label }}">
+                                <label class="form-check-label small fw-semibold ms-2 cursor-pointer mb-0 user-select-none" for="{{ checkbox.id_for_label }}">
                                     {{ checkbox.choice_label }}
                                 </label>
                             </div>
                             {% empty %}
-                            <span class="text-muted small">Henüz tanımlı etiket bulunmuyor.</span>
+                            <div class="text-muted small py-1" id="noTagsNotice">
+                                <i class="bi bi-info-circle me-1"></i> Henüz tanımlı etiket bulunmuyor. Sağ üstteki <strong>"Yeni Etiket Tanımla"</strong> butonunu kullanarak hemen yeni bir etiket ekleyebilirsiniz.
+                            </div>
                             {% endfor %}
+                        </div>
+                        <div id="tagLimitAlert" class="alert alert-warning small py-1 px-3 mt-2 d-none">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i> En fazla 5 etiket seçebilirsiniz!
                         </div>
                         {% if form.tags.errors %}
                         <div class="text-danger small mt-1">{{ form.tags.errors }}</div>
@@ -208,8 +232,421 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
     </div>
 </div>
 
+<!-- HIZLI YENİ ETİKET TANIMLAMA MODALI -->
+<div class="modal fade" id="newTagModal" tabindex="-1" aria-labelledby="newTagModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-primary text-white py-3">
+                <h6 class="modal-title fw-bold" id="newTagModalLabel">
+                    <i class="bi bi-tag-fill me-1"></i> Yeni Etiket Tanımla
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <form id="newTagForm">
+                <div class="modal-body p-3">
+                    <div id="newTagError" class="alert alert-danger small py-2 d-none"></div>
+                    <div class="mb-2">
+                        <label for="newTagName" class="form-label fw-bold small text-muted">Etiket Adı <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="newTagName" placeholder="Örn: Ağ Sorunu (Maks 20 kr)" required maxlength="20">
+                        <div class="form-text small text-muted">Maksimum 20 karakter. Etiket rengi standart kurumsal mavidir.</div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light p-2">
+                    <button type="button" class="btn btn-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary btn-sm rounded-pill px-3 fw-semibold" id="btnSaveNewTag">
+                        <i class="bi bi-check-circle me-1"></i> Kaydet ve Ekle
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% if user.is_staff %}
+<!-- ETİKET YÖNETİMİ (DÜZENLE / SİL) MODALI -->
+<div class="modal fade" id="manageTagsModal" tabindex="-1" aria-labelledby="manageTagsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-md">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-secondary text-white py-3">
+                <h6 class="modal-title fw-bold" id="manageTagsModalLabel">
+                    <i class="bi bi-tags-fill me-1"></i> Etiketleri Yönet (Düzenle / Sil)
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div id="manageTagsAlert" class="alert alert-info small py-2 d-none"></div>
+                <div class="text-muted small mb-3">
+                    <i class="bi bi-info-circle me-1"></i> Var olan etiketleri yeniden adlandırabilir veya gereksiz etiketleri silebilirsiniz.
+                </div>
+                <div class="table-responsive" style="max-height: 320px; overflow-y: auto;">
+                    <table class="table table-hover table-sm align-middle mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Etiket Adı</th>
+                                <th class="text-center" style="width: 80px;">Kullanım</th>
+                                <th class="text-end" style="width: 110px;">İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manageTagsTableBody">
+                            <tr>
+                                <td colspan="3" class="text-center text-muted py-3">
+                                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                                    Etiketler yükleniyor...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer bg-light p-2">
+                <button type="button" class="btn btn-secondary btn-sm rounded-pill px-4" data-bs-dismiss="modal">Kapat</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <script>
     document.addEventListener('DOMContentLoaded', function () {
+        // Etiket Seçim ve Sınırlama (Maks 5 Etiket)
+        const tagsContainer = document.getElementById('tagsContainer');
+        const tagCountBadge = document.getElementById('tagCountBadge');
+        const tagLimitAlert = document.getElementById('tagLimitAlert');
+
+        function updateTagSelection() {
+            if (!tagsContainer) return;
+            const checkboxes = tagsContainer.querySelectorAll('input[type="checkbox"][name="tags"]');
+            let selectedCount = 0;
+
+            checkboxes.forEach(cb => {
+                const parent = cb.closest('.tag-item-badge');
+                if (cb.checked) {
+                    selectedCount++;
+                    if (parent) {
+                        parent.classList.add('border-primary', 'bg-primary-subtle', 'text-primary');
+                        parent.classList.remove('bg-white');
+                    }
+                } else {
+                    if (parent) {
+                        parent.classList.remove('border-primary', 'bg-primary-subtle', 'text-primary');
+                        parent.classList.add('bg-white');
+                    }
+                }
+            });
+
+            if (tagCountBadge) {
+                tagCountBadge.textContent = `${selectedCount} / 5 Seçildi`;
+                if (selectedCount >= 5) {
+                    tagCountBadge.className = 'badge bg-warning-subtle text-warning-emphasis border border-warning ms-2';
+                } else {
+                    tagCountBadge.className = 'badge bg-primary-subtle text-primary border ms-2';
+                }
+            }
+            return selectedCount;
+        }
+
+        if (tagsContainer) {
+            tagsContainer.addEventListener('change', function (e) {
+                if (e.target && e.target.type === 'checkbox' && e.target.name === 'tags') {
+                    const checkedCount = tagsContainer.querySelectorAll('input[type="checkbox"][name="tags"]:checked').length;
+                    if (checkedCount > 5) {
+                        e.target.checked = false;
+                        if (tagLimitAlert) {
+                            tagLimitAlert.classList.remove('d-none');
+                            setTimeout(() => { tagLimitAlert.classList.add('d-none'); }, 3500);
+                        }
+                    } else if (tagLimitAlert) {
+                        tagLimitAlert.classList.add('d-none');
+                    }
+                    updateTagSelection();
+                }
+            });
+            updateTagSelection();
+        }
+
+        // Hızlı Yeni Etiket Oluşturma (AJAX)
+        const newTagForm = document.getElementById('newTagForm');
+        if (newTagForm) {
+            newTagForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                const tagNameInput = document.getElementById('newTagName');
+                const tagName = tagNameInput ? tagNameInput.value.trim() : '';
+                const tagColor = '#3B82F6';
+                const errorAlert = document.getElementById('newTagError');
+                const btnSave = document.getElementById('btnSaveNewTag');
+
+                if (!tagName) return;
+                if (tagName.length > 20) {
+                    if (errorAlert) {
+                        errorAlert.textContent = 'Etiket adı en fazla 20 karakter olabilir.';
+                        errorAlert.classList.remove('d-none');
+                    }
+                    return;
+                }
+
+                if (btnSave) btnSave.disabled = true;
+                if (errorAlert) errorAlert.classList.add('d-none');
+
+                fetch("{% url 'create_tag_api' %}", {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({ name: tagName, color: tagColor })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (btnSave) btnSave.disabled = false;
+                    if (data.status === 'success') {
+                        const tag = data.tag;
+                        const container = document.getElementById('tagsContainer');
+                        const noNotice = document.getElementById('noTagsNotice');
+                        if (noNotice) noNotice.remove();
+
+                        const currentChecked = container ? container.querySelectorAll('input[type="checkbox"][name="tags"]:checked').length : 0;
+                        const shouldCheck = currentChecked < 5;
+
+                        let existingInput = container.querySelector(`input[value="${tag.id}"]`);
+                        if (existingInput) {
+                            if (shouldCheck) existingInput.checked = true;
+                        } else {
+                            const div = document.createElement('div');
+                            div.className = 'form-check tag-item-badge d-flex align-items-center bg-white border rounded-pill px-3 py-1.5 shadow-xs mb-1 transition-all';
+                            div.style.cursor = 'pointer';
+                            div.innerHTML = `
+                                <input type="checkbox" name="tags" value="${tag.id}" class="form-check-input" id="id_tags_${tag.id}" ${shouldCheck ? 'checked' : ''}>
+                                <label class="form-check-label small fw-semibold ms-2 cursor-pointer mb-0 user-select-none" for="id_tags_${tag.id}">
+                                    ${tag.name}
+                                </label>
+                            `;
+                            container.appendChild(div);
+                        }
+
+                        updateTagSelection();
+
+                        const modalEl = document.getElementById('newTagModal');
+                        if (modalEl && typeof bootstrap !== 'undefined') {
+                            const modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+                            modal.hide();
+                        }
+                        newTagForm.reset();
+                    } else {
+                        if (errorAlert) {
+                            errorAlert.textContent = data.message || 'Hata oluştu.';
+                            errorAlert.classList.remove('d-none');
+                        }
+                    }
+                })
+                .catch(() => {
+                    if (btnSave) btnSave.disabled = false;
+                    if (errorAlert) {
+                        errorAlert.textContent = 'Sunucu ile iletişim kurulurken bir hata oluştu.';
+                        errorAlert.classList.remove('d-none');
+                    }
+                });
+            });
+        }
+
+        // --- ETİKET YÖNETİMİ (LİSTELEME, DÜZENLEME, SİLME) JS ---
+        const manageTagsModalEl = document.getElementById('manageTagsModal');
+        const manageTagsTableBody = document.getElementById('manageTagsTableBody');
+        const manageTagsAlert = document.getElementById('manageTagsAlert');
+
+        function showManageTagsAlert(msg, type = 'success') {
+            if (!manageTagsAlert) return;
+            manageTagsAlert.className = `alert alert-${type} small py-2`;
+            manageTagsAlert.textContent = msg;
+            manageTagsAlert.classList.remove('d-none');
+            setTimeout(() => {
+                manageTagsAlert.classList.add('d-none');
+            }, 3000);
+        }
+
+        function loadManageTags() {
+            if (!manageTagsTableBody) return;
+            manageTagsTableBody.innerHTML = `
+                <tr>
+                    <td colspan="3" class="text-center text-muted py-3">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                        Etiketler yükleniyor...
+                    </td>
+                </tr>
+            `;
+
+            fetch("{% url 'list_tags_api' %}")
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        if (!data.tags || data.tags.length === 0) {
+                            manageTagsTableBody.innerHTML = `
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted py-3">
+                                        Tanımlı etiket bulunmuyor.
+                                    </td>
+                                </tr>
+                            `;
+                            return;
+                        }
+
+                        let html = '';
+                        data.tags.forEach(t => {
+                            html += `
+                                <tr data-tag-row="${t.id}">
+                                    <td>
+                                        <div class="d-flex align-items-center gap-1">
+                                            <span class="tag-name-display fw-semibold text-primary" id="tagNameDisplay_${t.id}">#${t.name}</span>
+                                            <input type="text" class="form-control form-control-sm d-none tag-name-input" id="tagNameInput_${t.id}" value="${t.name}" maxlength="20" style="max-width: 170px;">
+                                        </div>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge bg-light text-secondary border">${t.ticket_count} talep</span>
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="btn-group btn-group-sm">
+                                            <button type="button" class="btn btn-outline-primary py-0 px-2 btn-edit-tag" data-tag-id="${t.id}" title="Düzenle">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-success py-0 px-2 d-none btn-save-tag" data-tag-id="${t.id}" title="Kaydet">
+                                                <i class="bi bi-check-lg"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-outline-danger py-0 px-2 btn-delete-tag" data-tag-id="${t.id}" data-tag-name="${t.name}" title="Sil">
+                                                <i class="bi bi-trash3"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        });
+                        manageTagsTableBody.innerHTML = html;
+                    }
+                })
+                .catch(() => {
+                    manageTagsTableBody.innerHTML = `
+                        <tr>
+                            <td colspan="3" class="text-center text-danger py-3">
+                                Etiketler yüklenirken bir hata oluştu.
+                            </td>
+                        </tr>
+                    `;
+                });
+        }
+
+        if (manageTagsModalEl) {
+            manageTagsModalEl.addEventListener('show.bs.modal', loadManageTags);
+
+            manageTagsTableBody.addEventListener('click', function (e) {
+                // Düzenlemeyi Aç
+                const editBtn = e.target.closest('.btn-edit-tag');
+                if (editBtn) {
+                    const tagId = editBtn.getAttribute('data-tag-id');
+                    const row = editBtn.closest('tr');
+                    const displaySpan = row.querySelector(`#tagNameDisplay_${tagId}`);
+                    const inputEl = row.querySelector(`#tagNameInput_${tagId}`);
+                    const saveBtn = row.querySelector('.btn-save-tag');
+
+                    displaySpan.classList.add('d-none');
+                    inputEl.classList.remove('d-none');
+                    inputEl.focus();
+                    editBtn.classList.add('d-none');
+                    saveBtn.classList.remove('d-none');
+                    return;
+                }
+
+                // Düzenlemeyi Kaydet
+                const saveBtn = e.target.closest('.btn-save-tag');
+                if (saveBtn) {
+                    const tagId = saveBtn.getAttribute('data-tag-id');
+                    const row = saveBtn.closest('tr');
+                    const displaySpan = row.querySelector(`#tagNameDisplay_${tagId}`);
+                    const inputEl = row.querySelector(`#tagNameInput_${tagId}`);
+                    const editBtn = row.querySelector('.btn-edit-tag');
+                    const newName = inputEl.value.trim();
+
+                    if (!newName) {
+                        alert('Etiket adı boş olamaz.');
+                        return;
+                    }
+
+                    saveBtn.disabled = true;
+                    fetch(`/api/tags/${tagId}/edit/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({ name: newName })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        saveBtn.disabled = false;
+                        if (data.status === 'success') {
+                            displaySpan.textContent = `#${data.tag.name}`;
+                            inputEl.value = data.tag.name;
+                            displaySpan.classList.remove('d-none');
+                            inputEl.classList.add('d-none');
+                            saveBtn.classList.add('d-none');
+                            editBtn.classList.remove('d-none');
+
+                            // Form alanındaki etiketi de güncelle
+                            const checkboxLabel = document.querySelector(`label[for="id_tags_${tagId}"]`);
+                            if (checkboxLabel) {
+                                checkboxLabel.textContent = data.tag.name;
+                            }
+                            showManageTagsAlert('Etiket başarıyla güncellendi.');
+                        } else {
+                            alert(data.message || 'Güncelleme başarısız oldu.');
+                        }
+                    })
+                    .catch(() => {
+                        saveBtn.disabled = false;
+                        alert('Sunucu hatası oluştu.');
+                    });
+                    return;
+                }
+
+                // Etiketi Sil
+                const deleteBtn = e.target.closest('.btn-delete-tag');
+                if (deleteBtn) {
+                    const tagId = deleteBtn.getAttribute('data-tag-id');
+                    const tagName = deleteBtn.getAttribute('data-tag-name');
+                    if (!confirm(`"${tagName}" etiketini silmek istediğinize emin misiniz?`)) return;
+
+                    deleteBtn.disabled = true;
+                    fetch(`/api/tags/${tagId}/delete/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        }
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            const row = deleteBtn.closest('tr');
+                            if (row) row.remove();
+
+                            // Form alanından da etiketi kaldır
+                            const checkboxInput = document.getElementById(`id_tags_${tagId}`);
+                            if (checkboxInput) {
+                                const badgeContainer = checkboxInput.closest('.tag-item-badge');
+                                if (badgeContainer) badgeContainer.remove();
+                                updateTagSelection();
+                            }
+                            showManageTagsAlert('Etiket silindi.');
+                        } else {
+                            deleteBtn.disabled = false;
+                            alert(data.message || 'Silme işlemi başarısız oldu.');
+                        }
+                    })
+                    .catch(() => {
+                        deleteBtn.disabled = false;
+                        alert('Sunucu hatası oluştu.');
+                    });
+                    return;
+                }
+            });
+        }
         const textarea = document.getElementById('{{ form.description.id_for_label }}');
         const quill = new Quill('#quill-editor', {
             theme: 'snow',

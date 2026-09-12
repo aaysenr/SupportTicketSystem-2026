@@ -1,6 +1,7 @@
-from django import forms # from django import forms: Django'nun form oluşturma, doğrulama ve widget yönetim modülünü içeri aktarır
-from django.contrib.auth.models import User 
-from .models import Ticket, TicketComment # Formun hangi veritabanı tablosunu temel alacağını belirtmek için Ticket ve TicketComment modelini içe aktarır.
+from django import forms
+from django.db.models import Count, Q
+from django.contrib.auth.models import User
+from .models import Ticket, TicketComment, TicketTag
 from django.contrib.auth.forms import UserCreationForm 
 from captcha.fields import CaptchaField 
 import nh3
@@ -12,29 +13,46 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
     Kullanıcıdan alınacak alanları ve HTML stil (Bootstrap) giydirmelerini yönetir.
     """
 
-
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Eğer kullanıcı yönetici değilse status ve assigned_to alanlarını kaldır
+        # Eğer kullanıcı personel değilse status alanını kaldır
         if user and not user.is_staff:
             if 'status' in self.fields:
                 del self.fields['status']
+
+        # Yöneticilere atama yapma yetkisi SADECE Süper Yöneticilere açıktır
+        profile = getattr(user, 'profile', None) if user else None
+        is_superadmin = user and (user.is_superuser or (profile and profile.role == 'superadmin'))
+
+        if not is_superadmin:
             if 'assigned_to' in self.fields:
                 del self.fields['assigned_to']
         else:
-            # Yöneticiler için 'assigned_to' liste seçeneklerinde sadece Yetkilileri (is_staff=True) göster
             if 'assigned_to' in self.fields:
                 self.fields['assigned_to'].queryset = User.objects.filter(is_staff=True)
                 self.fields['assigned_to'].empty_label = "Henüz Atanmadı (Atama Yap)"
 
- 
-   
-    
         if 'tags' in self.fields:
+            # En çok kullanılan ilk 10 etiketi listele
+            top_tag_ids = list(TicketTag.objects.annotate(usage=Count('tickets')).order_by('-usage', 'name')[:10].values_list('id', flat=True))
+            if self.instance and self.instance.pk:
+                existing_ids = list(self.instance.tags.values_list('id', flat=True))
+                combined_ids = list(dict.fromkeys(top_tag_ids + existing_ids))
+                self.fields['tags'].queryset = TicketTag.objects.filter(id__in=combined_ids)
+            else:
+                self.fields['tags'].queryset = TicketTag.objects.filter(id__in=top_tag_ids)
+
             self.fields['tags'].widget = forms.CheckboxSelectMultiple(attrs={'class': 'form-check-input'})
+            self.fields['tags'].widget.choices = self.fields['tags'].choices
             self.fields['tags'].required = False
             self.fields['tags'].label = "Etiketler"
+
+    def clean_tags(self):
+        tags = self.cleaned_data.get('tags')
+        if tags and len(tags) > 5:
+            raise forms.ValidationError("En fazla 5 etiket seçebilirsiniz.")
+        return tags
 
     def clean_attachment(self):
         attachment = self.cleaned_data.get('attachment')
@@ -91,6 +109,9 @@ class TicketForm(forms.ModelForm):  # Django'nun hazır ModelForm sınıfından 
             }),
             'is_public': forms.CheckboxInput(attrs={
                 'class': 'form-check-input ms-0'
+            }),
+            'tags': forms.CheckboxSelectMultiple(attrs={
+                'class': 'form-check-input'
             }),
         }
 
@@ -298,4 +319,32 @@ class CommentEditForm(forms.ModelForm):
                 'placeholder': 'Yanıtınızı düzenleyin...'
             })
         }
+
+
+from django.contrib.auth.forms import PasswordResetForm
+
+class CustomPasswordResetForm(PasswordResetForm):
+    """
+    Şifre sıfırlama formu:
+    Hem e-posta gönderir hem de test/geliştirme ortamında şifre sıfırlama bağlantısını
+    konsola (terminale) net bir kutu şeklinde yazdırır.
+    """
+    def send_mail(self, subject_template_name, email_template_name,
+                  context, from_email, to_email, html_email_template_name=None):
+        super().send_mail(subject_template_name, email_template_name,
+                          context, from_email, to_email, html_email_template_name)
+        
+        # Test ve doğrulama için konsola/terminale de açıkça yazdır
+        reset_url = f"{context.get('protocol')}://{context.get('domain')}/reset/{context.get('uid')}/{context.get('token')}/"
+        user_obj = context.get('user')
+        username = getattr(user_obj, 'username', 'Kullanıcı')
+        
+        print("\n" + "=" * 65)
+        print(" [TEST / GELİŞTİRME] ŞİFRE SIFIRLAMA E-POSTASI GÖNDERİLDİ")
+        print("=" * 65)
+        print(f" Alıcı E-Posta : {to_email}")
+        print(f" Kullanıcı     : {username}")
+        print(f" Sıfırlama URL : {reset_url}")
+        print("=" * 65 + "\n")
+
 

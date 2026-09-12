@@ -129,24 +129,50 @@
 <!-- Arama ve Filtreleme Kartı -->
 <div class="card shadow-sm mb-4">
     <div class="card-body bg-light">
-        <form method="GET" class="row g-3">
+        <form method="GET" class="row g-2 align-items-end">
             <!-- Taleplerim veya Genel Filtresi Saklama -->
             {% if filter_mine %}
             <input type="hidden" name="mine" value="1">
             {% endif %}
 
             <!-- Metin Arama Kutusu -->
-            <div class="col-lg-3 col-md-6">
-                <label for="q" class="form-label fw-bold small text-muted">Kelime ile Ara</label>
+            <div class="col-xl-3 col-lg-4 col-md-6 col-12">
+                <label for="q" class="form-label fw-bold small text-muted mb-1 text-nowrap">Kelime ile Ara</label>
                 <div class="input-group">
                     <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
                     <input type="text" name="q" id="q" class="form-control" placeholder="Başlık veya açıklamada ara..."
                         value="{{ search_query }}">
                 </div>
             </div>
+
+            <!-- Kategori Filtresi (Aşağı Doğru Açılan Özel Seçim Menüsü) -->
+            <div class="col-xl-2 col-lg-3 col-md-3 col-6">
+                <label class="form-label fw-bold small text-muted mb-1 text-nowrap">Kategori</label>
+                <input type="hidden" name="category" id="categoryHiddenInput" value="{{ selected_category }}">
+                <div class="dropdown">
+                    <button class="form-select text-start d-flex justify-content-between align-items-center text-truncate" type="button" id="categoryDropdownBtn" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">
+                        <span class="text-truncate" id="categorySelectedLabel">
+                            {% if selected_category %}
+                                {% for cat in categories %}
+                                    {% if selected_category == cat.id|stringformat:"s" %}{{ cat.name }}{% endif %}
+                                {% endfor %}
+                            {% else %}
+                                Tüm Kategoriler
+                            {% endif %}
+                        </span>
+                    </button>
+                    <ul class="dropdown-menu shadow-sm w-100 mt-1 py-1" aria-labelledby="categoryDropdownBtn" style="max-height: 280px; overflow-y: auto; z-index: 1050;" id="categoryDropdownMenu">
+                        <li><a class="dropdown-item py-1.5 small {% if not selected_category %}active fw-bold{% endif %}" href="#" data-value="">Tüm Kategoriler</a></li>
+                        {% for cat in categories %}
+                        <li><a class="dropdown-item py-1.5 small {% if selected_category == cat.id|stringformat:'s' %}active fw-bold{% endif %}" href="#" data-value="{{ cat.id }}">{{ cat.name }}</a></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+
             <!-- Durum Filtresi -->
-            <div class="col-lg-2 col-md-3">
-                <label for="status" class="form-label fw-bold small text-muted">Durum</label>
+            <div class="col-xl col-lg-3 col-md-3 col-6">
+                <label for="status" class="form-label fw-bold small text-muted mb-1 text-nowrap">Durum</label>
                 <select name="status" id="status" class="form-select">
                     <option value="">Tüm Durumlar</option>
                     {% for key, value in status_choices %}
@@ -158,9 +184,10 @@
                     {% endfor %}
                 </select>
             </div>
+
             <!-- Öncelik Filtresi -->
-            <div class="col-lg-2 col-md-3">
-                <label for="priority" class="form-label fw-bold small text-muted">Öncelik</label>
+            <div class="col-xl col-lg-2 col-md-3 col-6">
+                <label for="priority" class="form-label fw-bold small text-muted mb-1 text-nowrap">Öncelik</label>
                 <select name="priority" id="priority" class="form-select">
                     <option value="">Tüm Öncelikler</option>
                     {% for key, value in priority_choices %}
@@ -172,29 +199,33 @@
                     {% endfor %}
                 </select>
             </div>
-            <!-- Etiket Filtresi -->
-            <div class="col-lg-2 col-md-4">
-                <label for="tag" class="form-label fw-bold small text-muted">Etiket</label>
-                <select name="tag" id="tag" class="form-select">
-                    <option value="">Tüm Etiketler</option>
-                    {% for t in tags %}
-                        <option value="{{ t.slug }}" {% if selected_tag == t.slug %}selected{% endif %}>{{ t.name }}</option>
+
+            <!-- Atanan Kişi Filtresi -->
+            <div class="col-xl-2 col-lg-3 col-md-3 col-6">
+                <label for="assigned_to" class="form-label fw-bold small text-muted mb-1 text-nowrap">Atanan Kişi</label>
+                <select name="assigned_to" id="assigned_to" class="form-select">
+                    <option value="">Tüm Sorumlular</option>
+                    <option value="unassigned" {% if selected_assigned == 'unassigned' %}selected{% endif %}>Atanmamış</option>
+                    {% for staff in staff_users %}
+                        <option value="{{ staff.id }}" {% if selected_assigned == staff.id|stringformat:"s" %}selected{% endif %}>{{ staff.get_full_name|default:staff.username }}</option>
                     {% endfor %}
                 </select>
             </div>
+
             <!-- Sıralama -->
-            <div class="col-lg-1 col-md-4">
-                <label for="sort" class="form-label fw-bold small text-muted">Sıralama</label>
-                <select name="sort" id="sort" class="form-select px-1">
+            <div class="col-xl col-lg-2 col-md-3 col-6">
+                <label for="sort" class="form-label fw-bold small text-muted mb-1 text-nowrap">Sıralama</label>
+                <select name="sort" id="sort" class="form-select">
                     <option value="newest" {% if selected_sort == 'newest' %}selected{% endif %}>En Yeni</option>
                     <option value="oldest" {% if selected_sort == 'oldest' %}selected{% endif %}>En Eski</option>
                     <option value="most_commented" {% if selected_sort == 'most_commented' %}selected{% endif %}>Çok Yorum</option>
                 </select>
             </div>
+
             <!-- Çözüm Durumu -->
-            <div class="col-lg-1 col-md-4">
-                <label for="solution" class="form-label fw-bold small text-muted">Çözüm</label>
-                <select name="solution" id="solution" class="form-select px-1">
+            <div class="col-xl col-lg-2 col-md-3 col-6">
+                <label for="solution" class="form-label fw-bold small text-muted mb-1 text-nowrap">Çözüm</label>
+                <select name="solution" id="solution" class="form-select">
                     <option value="all" {% if selected_solution == 'all' %}selected{% endif %}>Tümü</option>
                     <option value="solved" {% if selected_solution == 'solved' %}selected{% endif %}>✓ Çözülen</option>
                     <option value="unsolved" {% if selected_solution == 'unsolved' %}selected{% endif %}>Çözülmeyen</option>
@@ -202,13 +233,13 @@
             </div>
 
             <!-- Butonlar -->
-            <div class="col-lg-1 col-md-12 d-flex align-items-end gap-1">
-                <button type="submit" class="btn btn-primary w-100" title="Filtrele">
-                    <i class="bi bi-funnel"></i>
+            <div class="col-auto d-flex align-items-end gap-1 ms-auto ms-xl-0">
+                <button type="submit" class="btn btn-primary px-3 fw-semibold text-nowrap" title="Filtrele">
+                    <i class="bi bi-funnel-fill me-1"></i> Filtrele
                 </button>
-                {% if search_query or selected_status or selected_priority or selected_tag or selected_sort != 'newest' or selected_solution != 'all' %}
-                <a href="{% url 'ticket_list' %}{% if filter_mine %}?mine=1{% endif %}" class="btn btn-outline-secondary" title="Sıfırla">
-                    <i class="bi bi-x-lg"></i>
+                {% if search_query or selected_status or selected_priority or selected_category or selected_assigned or selected_tag or selected_sort != 'newest' or selected_solution != 'all' %}
+                <a href="{% url 'ticket_list' %}{% if filter_mine %}?mine=1{% endif %}" class="btn btn-outline-secondary" title="Filtreleri Sıfırla">
+                    <i class="bi bi-arrow-counterclockwise"></i>
                 </a>
                 {% endif %}
             </div>
@@ -234,9 +265,11 @@
                 <select name="bulk_action" id="bulkActionSelect" class="form-select form-select-sm" style="width: 190px;" onchange="handleBulkActionChange()">
                     <option value="">İşlem Seçiniz...</option>
                     <option value="status">Durumu Değiştir</option>
+                    {% if is_superadmin %}
                     <option value="assign">Yöneticiye Ata</option>
+                    {% endif %}
                     <option value="category">Kategori Değiştir</option>
-                    <option value="merge">Seçilenleri Birleştir (Merge)</option>
+                    <option value="merge">Seçilenleri Birleştir</option>
                 </select>
 
                 <!-- Dinamik Hedef Değerler -->
@@ -478,6 +511,35 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.ticket-select-checkbox').forEach(function(cb) {
         cb.addEventListener('change', updateBulkCardState);
     });
+
+    // Kategori Özel Açılır Menü Seçim Olayı
+    const categoryMenu = document.getElementById('categoryDropdownMenu');
+    const categoryHiddenInput = document.getElementById('categoryHiddenInput');
+    const categorySelectedLabel = document.getElementById('categorySelectedLabel');
+
+    if (categoryMenu && categoryHiddenInput && categorySelectedLabel) {
+        categoryMenu.addEventListener('click', function(e) {
+            const item = e.target.closest('.dropdown-item');
+            if (!item) return;
+            e.preventDefault();
+
+            const val = item.getAttribute('data-value') || '';
+            const text = item.textContent.trim();
+
+            categoryHiddenInput.value = val;
+            categorySelectedLabel.textContent = text;
+
+            // Aktiflik sınıfını güncelle
+            categoryMenu.querySelectorAll('.dropdown-item').forEach(el => {
+                el.classList.remove('active', 'fw-bold');
+            });
+            item.classList.add('active', 'fw-bold');
+
+            // Formu otomatik filtrele veya kullanıcı 'Filtrele'ye basabilir
+            const form = categoryHiddenInput.closest('form');
+            if (form) form.submit();
+        });
+    }
 });
 
 function handleBulkActionChange() {
@@ -522,7 +584,7 @@ function prepareBulkSubmit() {
         }
         targetValue = 'merge';
         document.getElementById('bulkTargetValue').value = targetValue;
-        return confirm(checkboxes.length + ' adet talep en eski talep altında BİRLEŞTİRİLECEK (Merge) ve diğerleri kapatılacaktır. Onaylıyor musunuz?');
+        return confirm(checkboxes.length + ' adet talep en eski talep altında BİRLEŞTİRİLECEK ve diğerleri kapatılacaktır. Onaylıyor musunuz?');
     }
 
     if (!targetValue) {

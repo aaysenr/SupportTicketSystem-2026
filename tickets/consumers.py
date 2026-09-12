@@ -13,7 +13,7 @@ ALLOWED_TAGS = {
     'span', 'strike', 's', 'sub', 'sup'
 }
 ALLOWED_ATTRIBUTES = {
-    'a': {'href', 'title', 'target', 'rel'},
+    'a': {'href', 'title', 'target'},
     'span': {'style', 'class'},
     'p': {'style', 'class'},
     'code': {'class'},
@@ -80,7 +80,48 @@ class TeamChatConsumer(AsyncWebsocketConsumer):
                 )
                 return
 
-            # 2. Normal Mesaj Gönderimi
+            # 2. Mesaj Düzenleme
+            if action_type == "edit_message":
+                msg_id = data.get("message_id")
+                new_content = data.get("content", "").strip()
+                if msg_id and new_content:
+                    edit_res = await self.edit_message(msg_id, new_content)
+                    if edit_res:
+                        await self.channel_layer.group_send(
+                            self.room_group_name,
+                            {
+                                "type": "chat_message_edit_broadcast",
+                                "message_id": msg_id,
+                                "content": edit_res.get("clean_content"),
+                                "updated_at": edit_res.get("updated_at"),
+                                "updated_at_full": edit_res.get("updated_at_full"),
+                            }
+                        )
+                return
+
+            # 3. Mesaj Silme
+            if action_type == "delete_message":
+                msg_id = data.get("message_id")
+                mode = data.get("mode", "for_me")
+                if msg_id:
+                    result = await self.delete_message(msg_id, mode)
+                    if result == "for_everyone":
+                        await self.channel_layer.group_send(
+                            self.room_group_name,
+                            {
+                                "type": "chat_message_delete_broadcast",
+                                "message_id": msg_id
+                            }
+                        )
+                    elif result == "for_me":
+                        await self.send(text_data=json.dumps({
+                            "status": "success",
+                            "type": "message_deleted_for_me",
+                            "message_id": msg_id,
+                        }))
+                return
+
+            # 4. Normal Mesaj Gönderimi
             content = data.get("content", "").strip()
             if not content:
                 return
@@ -113,6 +154,27 @@ class TeamChatConsumer(AsyncWebsocketConsumer):
             "sender_name": event.get("sender_name"),
             "content": event.get("content"),
             "created_at": event.get("created_at"),
+            "date_key": event.get("date_key"),
+            "date_display": event.get("date_display"),
+        }))
+
+    async def chat_message_edit_broadcast(self, event):
+        """Düzenlenen mesajı istemcilere bildir"""
+        await self.send(text_data=json.dumps({
+            "status": "success",
+            "type": "message_edited",
+            "message_id": event.get("message_id"),
+            "content": event.get("content"),
+            "updated_at": event.get("updated_at"),
+            "updated_at_full": event.get("updated_at_full"),
+        }))
+
+    async def chat_message_delete_broadcast(self, event):
+        """Silinen mesajı istemcilere bildir"""
+        await self.send(text_data=json.dumps({
+            "status": "success",
+            "type": "message_deleted",
+            "message_id": event.get("message_id"),
         }))
 
     async def chat_typing_broadcast(self, event):
@@ -170,13 +232,68 @@ class TeamChatConsumer(AsyncWebsocketConsumer):
                     content=clean_content
                 )
 
+            now_local = timezone.localtime(msg.created_at)
+            today = timezone.localdate()
+            msg_date = now_local.date()
+            if msg_date == today:
+                date_display = "Bugün"
+            elif msg_date == today - timezone.timedelta(days=1):
+                date_display = "Dün"
+            else:
+                date_display = msg_date.strftime("%d.%m.%Y")
+
             return {
                 "message_id": msg.id,
                 "sender_id": self.user.id,
                 "sender_name": self.user.get_full_name() or self.user.username,
                 "content": msg.content,
-                "created_at": msg.created_at.strftime("%H:%M")
+                "created_at": now_local.strftime("%H:%M"),
+                "date_key": msg_date.strftime("%Y-%m-%d"),
+                "date_display": date_display,
             }
+        except Exception:
+            return None
+
+    @database_sync_to_async
+    def edit_message(self, msg_id, new_content):
+        """Mesajı veritabanında güncelle"""
+        try:
+            msg = ChatMessage.objects.filter(id=msg_id, sender=self.user).first()
+            if not msg:
+                return None
+            clean = nh3.clean(new_content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES)
+            msg.content = clean
+            msg.is_edited = True
+            msg.save()
+            now_local = timezone.localtime(msg.updated_at)
+            return {
+                "clean_content": clean,
+                "updated_at": now_local.strftime("%H:%M"),
+                "updated_at_full": now_local.strftime("%d.%m.%Y %H:%M")
+            }
+        except Exception:
+            return None
+
+    @database_sync_to_async
+    def delete_message(self, msg_id, mode="for_me"):
+        """Mesajı silindi veya kullanıcı için gizlendi olarak işaretle"""
+        try:
+            msg = ChatMessage.objects.filter(id=msg_id).first()
+            if not msg:
+                return None
+
+            is_owner = (msg.sender_id == self.user.id or self.user.is_superuser)
+
+            if mode == "for_everyone":
+                if not is_owner:
+                    return None
+                msg.is_deleted = True
+                msg.save(update_fields=['is_deleted'])
+                return "for_everyone"
+            else:
+                # mode == "for_me"
+                msg.deleted_for_users.add(self.user)
+                return "for_me"
         except Exception:
             return None
 

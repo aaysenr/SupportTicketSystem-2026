@@ -1,6 +1,6 @@
 from django.urls import path
 from django.contrib.auth import views as auth_views
-from . import views
+from . import views, forms
 
 urlpatterns = [
     # Talep İşlemleri
@@ -26,6 +26,7 @@ urlpatterns = [
 
     # Şifre Sıfırlama (Password Reset) Akışı
     path('password-reset/', auth_views.PasswordResetView.as_view(
+        form_class=forms.CustomPasswordResetForm,
         template_name='tickets/password_reset_form.html',
         email_template_name='tickets/password_reset_email.html',
         subject_template_name='tickets/password_reset_subject.txt',
@@ -55,6 +56,11 @@ urlpatterns = [
     path('team-chat/send/', views.send_chat_message_view, name='send_chat_message'),
     path('team-chat/create-group/', views.create_chat_group_view, name='create_chat_group'),
     path('team-chat/api/messages/<str:chat_type>/<int:chat_id>/', views.get_chat_messages_api, name='get_chat_messages_api'),
+    path('team-chat/api/message/<int:pk>/edit/', views.edit_chat_message_view, name='edit_chat_message'),
+    path('team-chat/api/message/<int:pk>/delete/', views.delete_chat_message_view, name='delete_chat_message'),
+    path('team-chat/api/message/<int:pk>/star/', views.toggle_favorite_chat_message_view, name='toggle_favorite_chat_message'),
+    path('team-chat/api/chat/clear/', views.clear_chat_view, name='clear_chat'),
+    path('team-chat/api/chat/archive/', views.toggle_archive_chat_view, name='toggle_archive_chat'),
 
     # Yorum Çözüm, Beğeni, Düzenleme ve Silme İşlemleri
     path('comment/<int:comment_id>/solution/', views.toggle_comment_solution, name='toggle_comment_solution'),
@@ -78,8 +84,10 @@ urlpatterns = [
     path('ticket/<int:pk>/attachment/', views.download_ticket_attachment, name='ticket_attachment_download'),
     path('comment/<int:comment_id>/attachment/', views.download_comment_attachment, name='comment_attachment_download'),
 
-    # Bildirim Toplu Okundu İşareti
+    # Bildirim İşlemleri (Toplu Okundu, Tekil/Toplu Silme)
     path('notifications/read-all/', views.mark_all_notifications_as_read, name='mark_all_notifications_read'),
+    path('notifications/<int:pk>/delete/', views.delete_notification, name='delete_notification'),
+    path('notifications/delete-all/', views.delete_all_notifications, name='delete_all_notifications'),
 
     # Raporlama ve Dışa Aktarma (Excel / CSV & PDF)
     path('export/tickets/', views.export_tickets_csv, name='export_tickets_csv'),
@@ -93,4 +101,10 @@ urlpatterns = [
 
     # Toplu İşlemler (Bulk Actions)
     path('tickets/bulk-action/', views.bulk_ticket_action, name='bulk_ticket_action'),
+
+    # Etiket Yönetimi API'leri
+    path('api/tags/', views.list_tags_api, name='list_tags_api'),
+    path('api/tags/create/', views.create_tag_api, name='create_tag_api'),
+    path('api/tags/<int:pk>/edit/', views.edit_tag_api, name='edit_tag_api'),
+    path('api/tags/<int:pk>/delete/', views.delete_tag_api, name='delete_tag_api'),
 ]

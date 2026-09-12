@@ -254,7 +254,7 @@ class Ticket(models.Model):
         blank=True,
         related_name='merged_tickets',
         verbose_name="Birleştirilen Ana Talep",
-        help_text="Eğer bu talep mükerrer ise ve başka bir ana talep ile birleştirildiyse referans verir."
+        help_text="Eğer bu talep yinelenen ise ve başka bir ana talep ile birleştirildiyse referans verir."
     )
 
     class Meta:
@@ -459,7 +459,12 @@ class ChatMessage(models.Model):
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='received_chat_messages', verbose_name="Alıcı (Özel Mesaj)")
     content = models.TextField(verbose_name="Mesaj İçeriği")
     is_read = models.BooleanField(default=False, verbose_name="Okundu mu?")
+    is_edited = models.BooleanField(default=False, verbose_name="Düzenlendi mi?")
+    is_deleted = models.BooleanField(default=False, verbose_name="Silindi mi?")
+    deleted_for_users = models.ManyToManyField(User, related_name='hidden_chat_messages', blank=True, verbose_name="Bu Kullanıcıdan Gizlendi")
+    favorited_by = models.ManyToManyField(User, related_name='starred_chat_messages', blank=True, verbose_name="Favorileyenler")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="Tarih")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Güncellenme Tarihi")
 
     class Meta:
         verbose_name = "Sohbet Mesajı"
@@ -472,6 +477,22 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"{self.sender.username}: {self.content[:30]}"
+
+
+class UserChatPreference(models.Model):
+    """
+    Kullanıcının sohbet bazlı tercihleri: arşivleme durumu ve sohbet geçmişini temizleme zamanı.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_preferences')
+    group = models.ForeignKey(ChatGroup, on_delete=models.CASCADE, null=True, blank=True, related_name='user_preferences')
+    dm_user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='dm_chat_preferences')
+    is_archived = models.BooleanField(default=False, verbose_name="Arşivlendi mi?")
+    cleared_at = models.DateTimeField(null=True, blank=True, verbose_name="Sohbet Temizleme Tarihi")
+
+    class Meta:
+        verbose_name = "Kullanıcı Sohbet Tercihi"
+        verbose_name_plural = "Kullanıcı Sohbet Tercihleri"
+        unique_together = [('user', 'group'), ('user', 'dm_user')]
 
 
 class UserProfile(models.Model):

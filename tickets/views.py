@@ -22,7 +22,7 @@ from django.utils import timezone
 
 from .models import (
     Ticket, TicketComment, Category, EmailVerification, TicketActivityLog,
-    Notification, ChatGroup, ChatMessage, UserProfile, KnowledgeBaseArticle,
+    Notification, ChatGroup, ChatMessage, UserChatPreference, UserProfile, KnowledgeBaseArticle,
     TicketRating, CannedResponse, TicketTag
 )
 from .forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm
@@ -33,6 +33,7 @@ from .totp import (
 from .pdf import generate_ticket_pdf
 from .webhooks import send_outgoing_webhook
 from .copilot import suggest_category_and_priority, generate_ticket_summary
+from .consumers import ALLOWED_TAGS, ALLOWED_ATTRIBUTES
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +50,19 @@ def admin_dashboard_view(request):
     profile = getattr(request.user, 'profile', None)
     is_superadmin = request.user.is_superuser or (profile and profile.role == 'superadmin')
 
-    # RBAC Kapsam Belirleme: Süper yönetici tüm talepleri, personel sadece kendi birimini görür
+    # RBAC Kapsam Belirleme:
+    # Süper yönetici: Tüm sistemi kapsayan genel analiz (Tüm talepler)
+    # Diğer adminler: Yalnızca kendi kategorileri ve kendilerine atanan talepler
     if is_superadmin:
         base_qs = Ticket.objects.all()
-        categories = Category.objects.annotate(ticket_count=Count('tickets'))
     elif profile and profile.assigned_categories.exists():
         allowed_cats = profile.assigned_categories.all()
         base_qs = Ticket.objects.filter(
             Q(category__in=allowed_cats) | Q(assigned_to=request.user)
         ).distinct()
-        categories = allowed_cats.annotate(ticket_count=Count('tickets'))
     else:
-        base_qs = Ticket.objects.all()
-        categories = Category.objects.annotate(ticket_count=Count('tickets'))
+        # Kategori tanımlanmamışsa sadece kendisine atanan talepleri analiz et
+        base_qs = Ticket.objects.filter(assigned_to=request.user)
 
     now = timezone.now()
     first_day_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -112,8 +113,19 @@ def admin_dashboard_view(request):
     satisfaction_rate = round((satisfied_count / csat_count) * 100, 1) if csat_count > 0 else 0
 
     # 4. Kategori Dağılımı Verileri (Chart.js İçin)
-    category_labels = [cat.name for cat in categories]
-    category_counts = [cat.ticket_count for cat in categories]
+    # Kapsamdaki taleplerin kategorilerine göre dağılımı (Süper admin tüm sistem, diğer adminler kendi talepleri)
+    cat_distribution = list(
+        base_qs.filter(category__isnull=False)
+        .values('category__name')
+        .annotate(ticket_count=Count('id'))
+        .order_by('-ticket_count')
+    )
+    category_labels = [c['category__name'] for c in cat_distribution]
+    category_counts = [c['ticket_count'] for c in cat_distribution]
+    uncat_count = base_qs.filter(category__isnull=True).count()
+    if uncat_count > 0:
+        category_labels.append("Kategorisiz")
+        category_counts.append(uncat_count)
 
     # 5. Öncelik Dağılımı Verileri
     priority_data = {
@@ -153,6 +165,46 @@ def admin_dashboard_view(request):
         csat_trend_labels.append(f"{month_names_tr.get(month, '')} {year}")
         csat_trend_values.append(val)
 
+    # 7. Son Müşteri Değerlendirmeleri ve Geri Bildirimleri (CSAT - Yalnızca Süper Adminler)
+    csat_assigned = request.GET.get('csat_assigned', '').strip()
+    csat_ticket_id = request.GET.get('csat_ticket_id', '').strip()
+    csat_user_id = request.GET.get('csat_user_id', '').strip()
+    csat_sort = request.GET.get('csat_sort', 'newest').strip()
+
+    if is_superadmin:
+        csat_qs = TicketRating.objects.filter(ticket__in=base_qs).select_related('ticket', 'user', 'ticket__assigned_to')
+
+        if csat_assigned:
+            if csat_assigned == 'unassigned':
+                csat_qs = csat_qs.filter(ticket__assigned_to__isnull=True)
+            elif csat_assigned.isdigit():
+                csat_qs = csat_qs.filter(ticket__assigned_to_id=int(csat_assigned))
+
+        if csat_ticket_id:
+            # Temiz id ya da DES-00010 gibi format desteği
+            clean_t_id = csat_ticket_id.upper().replace('DES-', '').replace('#', '').strip()
+            if clean_t_id.isdigit():
+                csat_qs = csat_qs.filter(ticket_id=int(clean_t_id))
+            else:
+                csat_qs = csat_qs.filter(ticket__title__icontains=csat_ticket_id)
+
+        if csat_user_id:
+            if csat_user_id.isdigit():
+                csat_qs = csat_qs.filter(Q(user_id=int(csat_user_id)) | Q(user__username__icontains=csat_user_id))
+            else:
+                csat_qs = csat_qs.filter(Q(user__username__icontains=csat_user_id) | Q(user__email__icontains=csat_user_id) | Q(user__first_name__icontains=csat_user_id) | Q(user__last_name__icontains=csat_user_id))
+
+        if csat_sort == 'oldest':
+            csat_qs = csat_qs.order_by('created_at')
+        else:
+            csat_qs = csat_qs.order_by('-created_at')
+
+        csat_ratings = csat_qs[:50]
+    else:
+        csat_ratings = []
+
+    staff_users = User.objects.filter(is_staff=True).order_by('first_name', 'username')
+
     context = {
         'total_tickets': total_tickets,
         'open_tickets': open_tickets,
@@ -170,6 +222,12 @@ def admin_dashboard_view(request):
         'csat_count': csat_count,
         'csat_avg': csat_avg,
         'satisfaction_rate': satisfaction_rate,
+        'csat_ratings': csat_ratings,
+        'staff_users': staff_users,
+        'csat_assigned': csat_assigned,
+        'csat_ticket_id': csat_ticket_id,
+        'csat_user_id': csat_user_id,
+        'csat_sort': csat_sort,
         
         # Chart.js'in JSON formatında okuyabilmesi için:
         'category_labels_json': json.dumps(category_labels),
@@ -404,6 +462,8 @@ def ticket_list(request):
     search_query = request.GET.get('q', '').strip()
     selected_status = request.GET.get('status', '').strip()
     selected_priority = request.GET.get('priority', '').strip()
+    selected_category = request.GET.get('category', '').strip()
+    selected_assigned = request.GET.get('assigned_to', '').strip()
     selected_tag = request.GET.get('tag', '').strip()
     selected_sort = request.GET.get('sort', 'newest').strip()
     selected_solution = request.GET.get('solution', 'all').strip()
@@ -418,6 +478,15 @@ def ticket_list(request):
 
     if selected_priority:
         tickets = tickets.filter(priority=selected_priority)
+
+    if selected_category:
+        tickets = tickets.filter(category_id=selected_category)
+
+    if selected_assigned:
+        if selected_assigned == 'unassigned':
+            tickets = tickets.filter(assigned_to__isnull=True)
+        else:
+            tickets = tickets.filter(assigned_to_id=selected_assigned)
 
     if selected_tag:
         tickets = tickets.filter(Q(tags__slug=selected_tag) | Q(tags__name=selected_tag)).distinct()
@@ -444,6 +513,8 @@ def ticket_list(request):
         'search_query': search_query,
         'selected_status': selected_status,
         'selected_priority': selected_priority,
+        'selected_category': selected_category,
+        'selected_assigned': selected_assigned,
         'selected_tag': selected_tag,
         'selected_sort': selected_sort,
         'selected_solution': selected_solution,
@@ -598,6 +669,7 @@ def ticket_create(request):
             ticket = form.save(commit=False)
             ticket.created_by = request.user
             ticket.save()
+            form.save_m2m()
             
             TicketActivityLog.objects.create(
                ticket=ticket,
@@ -900,6 +972,31 @@ def mark_all_notifications_as_read(request):
     next_url = request.GET.get('next') or request.META.get('HTTP_REFERER') or 'notifications_list'
     return redirect(next_url)
 
+
+@login_required
+def delete_notification(request, pk):
+    """
+    Kullanıcının seçili bildirimini siler.
+    """
+    notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
+    notification.delete()
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'status': 'success', 'message': 'Bildirim silindi.'})
+    messages.success(request, "Bildirim silindi.")
+    return redirect('notifications_list')
+
+
+@login_required
+def delete_all_notifications(request):
+    """
+    Kullanıcının tüm bildirimlerini siler.
+    """
+    count, _ = Notification.objects.filter(recipient=request.user).delete()
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.content_type == 'application/json':
+        return JsonResponse({'status': 'success', 'deleted_count': count})
+    messages.success(request, f"Tüm bildirimleriniz ({count} adet) silindi.")
+    return redirect('notifications_list')
+
    
 
 @login_required
@@ -928,8 +1025,22 @@ def team_chat_view(request, chat_type='group', chat_id=None):
         )
     )
 
-    # 3. Giriş yapan yöneticinin dahil olduğu Özel Gruplar
-    user_groups = ChatGroup.objects.filter(members=request.user, is_general=False)
+    # 3. Giriş yapan yöneticinin dahil olduğu Özel Gruplar ve Arşiv Durumu
+    all_user_groups = ChatGroup.objects.filter(members=request.user, is_general=False)
+    archived_group_ids = set(
+        UserChatPreference.objects.filter(user=request.user, is_archived=True, group__isnull=False)
+        .values_list('group_id', flat=True)
+    )
+    archived_dm_user_ids = set(
+        UserChatPreference.objects.filter(user=request.user, is_archived=True, dm_user__isnull=False)
+        .values_list('dm_user_id', flat=True)
+    )
+
+    user_groups = [g for g in all_user_groups if g.id not in archived_group_ids]
+    archived_groups = [g for g in all_user_groups if g.id in archived_group_ids]
+
+    for mgr in managers:
+        mgr.is_dm_archived = mgr.id in archived_dm_user_ids
 
     # 4. Aktif Sohbet Kanalını Belirle
     active_channel = {
@@ -937,37 +1048,45 @@ def team_chat_view(request, chat_type='group', chat_id=None):
         'id': chat_id,
         'title': 'Genel Ekip Odası',
         'target_user': None,
-        'group': general_group
+        'group': general_group,
+        'is_archived': False,
     }
 
-    messages_list = []
-
+    current_pref = None
     if chat_type == 'dm' and chat_id:
         recipient = get_object_or_404(User, id=chat_id, is_staff=True)
-        active_channel['title'] = f"💬 {recipient.get_full_name() or recipient.username}"
+        active_channel['title'] = recipient.get_full_name() or recipient.username
         active_channel['target_user'] = recipient
-        # İki kullanıcı arasındaki özel mesajlar (DM)
+        current_pref = UserChatPreference.objects.filter(user=request.user, dm_user=recipient).first()
         messages_list = ChatMessage.objects.filter(
             Q(sender=request.user, recipient=recipient) |
             Q(sender=recipient, recipient=request.user)
-        ).order_by('created_at')
-
+        )
     elif chat_type == 'group' and chat_id:
         group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
-        active_channel['title'] = f"👥 {group.name}"
+        active_channel['title'] = group.name
         active_channel['group'] = group
-        messages_list = group.messages.all().order_by('created_at')
-
+        current_pref = UserChatPreference.objects.filter(user=request.user, group=group).first()
+        messages_list = group.messages.all()
     else:
-        # Varsayılan: Genel Ekip Odası
         active_channel['type'] = 'group'
         active_channel['id'] = general_group.id
-        messages_list = general_group.messages.all().order_by('created_at')
+        current_pref = UserChatPreference.objects.filter(user=request.user, group=general_group).first()
+        messages_list = general_group.messages.all()
+
+    if current_pref:
+        active_channel['is_archived'] = current_pref.is_archived
+        if current_pref.cleared_at:
+            messages_list = messages_list.filter(created_at__gt=current_pref.cleared_at)
+
+    messages_list = messages_list.filter(is_deleted=False).exclude(deleted_for_users=request.user).prefetch_related('favorited_by').order_by('created_at')
 
     context = {
         'managers': managers,
         'general_group': general_group,
         'user_groups': user_groups,
+        'archived_groups': archived_groups,
+        'archived_dm_user_ids': archived_dm_user_ids,
         'active_channel': active_channel,
         'chat_messages': messages_list,
     }
@@ -991,13 +1110,28 @@ def send_chat_message_view(request):
         if not content:
             return JsonResponse({'status': 'error', 'message': 'Mesaj boş olamaz'}, status=400)
 
+        # XSS Temizliği
+        clean_content = nh3.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES)
+        if not clean_content:
+            return JsonResponse({'status': 'error', 'message': 'Geçersiz mesaj içeriği'}, status=400)
+
         msg = None
         if chat_type == 'dm':
             recipient = get_object_or_404(User, id=chat_id, is_staff=True)
-            msg = ChatMessage.objects.create(sender=request.user, recipient=recipient, content=content)
+            msg = ChatMessage.objects.create(sender=request.user, recipient=recipient, content=clean_content)
         else:
             group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
-            msg = ChatMessage.objects.create(sender=request.user, group=group, content=content)
+            msg = ChatMessage.objects.create(sender=request.user, group=group, content=clean_content)
+
+        now_local = timezone.localtime(msg.created_at)
+        today = timezone.localdate()
+        msg_date = now_local.date()
+        if msg_date == today:
+            date_display = "Bugün"
+        elif msg_date == today - timezone.timedelta(days=1):
+            date_display = "Dün"
+        else:
+            date_display = msg_date.strftime("%d.%m.%Y")
 
         # WebSocket kullanıcılarına anlık yayınla (Channel Layer Broadcast)
         try:
@@ -1019,7 +1153,9 @@ def send_chat_message_view(request):
                         "sender_id": msg.sender.id,
                         "sender_name": msg.sender.get_full_name() or msg.sender.username,
                         "content": msg.content,
-                        "created_at": msg.created_at.strftime('%H:%M')
+                        "created_at": now_local.strftime('%H:%M'),
+                        "date_key": msg_date.strftime("%Y-%m-%d"),
+                        "date_display": date_display,
                     }
                 )
         except Exception:
@@ -1031,10 +1167,227 @@ def send_chat_message_view(request):
             'sender_id': msg.sender.id,
             'sender_name': msg.sender.get_full_name() or msg.sender.username,
             'content': msg.content,
-            'created_at': msg.created_at.strftime('%H:%M')
+            'created_at': now_local.strftime('%H:%M'),
+            'date_key': msg_date.strftime("%Y-%m-%d"),
+            'date_display': date_display,
         })
 
     return JsonResponse({'status': 'error', 'message': 'Geçersiz istek'}, status=400)
+
+
+@login_required
+@require_POST
+def edit_chat_message_view(request, pk):
+    """
+    Kullanıcının kendi mesajını düzenlemesi.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Yetkisiz erişim.'}, status=403)
+    
+    msg = get_object_or_404(ChatMessage, pk=pk)
+    if msg.sender != request.user:
+        return JsonResponse({'status': 'error', 'message': 'Yalnızca kendi mesajlarınızı düzenleyebilirsiniz.'}, status=403)
+    
+    body_data = {}
+    if request.content_type == 'application/json':
+        try:
+            body_data = json.loads(request.body)
+        except Exception:
+            pass
+    new_content = (body_data.get('content') or request.POST.get('content', '')).strip()
+    if not new_content:
+        return JsonResponse({'status': 'error', 'message': 'Mesaj boş olamaz.'}, status=400)
+    
+    clean_content = nh3.clean(new_content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES)
+    msg.content = clean_content
+    msg.is_edited = True
+    msg.save(update_fields=['content', 'is_edited'])
+    now_local = timezone.localtime(msg.updated_at)
+    updated_at_str = now_local.strftime("%H:%M")
+    updated_at_full_str = now_local.strftime("%d.%m.%Y %H:%M")
+
+    # Broadcast via channels
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            if msg.group:
+                room_group = f"chat_group_{msg.group.id}"
+            else:
+                u1, u2 = sorted([msg.sender_id, msg.recipient_id])
+                room_group = f"chat_dm_{u1}_{u2}"
+            async_to_sync(channel_layer.group_send)(
+                room_group,
+                {
+                    "type": "chat_message_edit_broadcast",
+                    "message_id": msg.id,
+                    "content": clean_content,
+                    "updated_at": updated_at_str,
+                    "updated_at_full": updated_at_full_str,
+                }
+            )
+    except Exception:
+        pass
+
+    return JsonResponse({
+        'status': 'success',
+        'message_id': msg.id,
+        'content': clean_content,
+        'updated_at': updated_at_str,
+        'updated_at_full': updated_at_full_str,
+    })
+
+
+@login_required
+@require_POST
+def delete_chat_message_view(request, pk):
+    """
+    Mesajı silme:
+    - mode='for_me' (Benden Sil): Sadece işlemi yapan kullanıcının ekranından kaldırılır (kendi veya başkasının mesajı).
+    - mode='for_everyone' (Herkesten Sil): Sadece mesajın sahibi veya süpervizör tarafından tüm sohbet için silinir.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Yetkisiz erişim.'}, status=403)
+
+    msg = get_object_or_404(ChatMessage, pk=pk)
+
+    is_owner = (msg.sender == request.user or request.user.is_superuser)
+    # Varsayılan mod: Eğer parametre verilmemişse ve kullanıcı mesaj sahibi ise 'for_everyone', başkası ise 'for_me'
+    default_mode = 'for_everyone' if is_owner else 'for_me'
+
+    mode = default_mode
+    if request.content_type == 'application/json':
+        try:
+            body_data = json.loads(request.body)
+            mode = body_data.get('mode', default_mode)
+        except Exception:
+            mode = default_mode
+    else:
+        mode = request.POST.get('mode', default_mode)
+
+    # Başkasının mesajını sadece kendi sohbetinden silebilir ('for_me')
+    if mode == 'for_everyone':
+        if not is_owner:
+            return JsonResponse({'status': 'error', 'message': 'Başkasının mesajını herkesten silemezsiniz, sadece kendinizden silebilirsiniz.'}, status=403)
+        msg.is_deleted = True
+        msg.save(update_fields=['is_deleted'])
+
+        # Broadcast via channels to all members
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                if msg.group:
+                    room_group = f"chat_group_{msg.group.id}"
+                else:
+                    u1, u2 = sorted([msg.sender_id, msg.recipient_id])
+                    room_group = f"chat_dm_{u1}_{u2}"
+                async_to_sync(channel_layer.group_send)(
+                    room_group,
+                    {
+                        "type": "chat_message_delete_broadcast",
+                        "message_id": msg.id
+                    }
+                )
+        except Exception:
+            pass
+
+        return JsonResponse({'status': 'success', 'message_id': msg.id, 'mode': 'for_everyone'})
+
+    else:
+        # mode == 'for_me'
+        msg.deleted_for_users.add(request.user)
+        return JsonResponse({'status': 'success', 'message_id': msg.id, 'mode': 'for_me'})
+
+
+@login_required
+@require_POST
+def toggle_favorite_chat_message_view(request, pk):
+    """
+    Mesajı favorilere ekler veya kaldırır.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Yetkisiz erişim.'}, status=403)
+
+    msg = get_object_or_404(ChatMessage, pk=pk)
+    if msg.favorited_by.filter(id=request.user.id).exists():
+        msg.favorited_by.remove(request.user)
+        is_favorited = False
+    else:
+        msg.favorited_by.add(request.user)
+        is_favorited = True
+
+    return JsonResponse({'status': 'success', 'message_id': msg.id, 'is_favorited': is_favorited})
+
+
+@login_required
+@require_POST
+def clear_chat_view(request):
+    """
+    Kullanıcının aktif sohbet (Grup veya DM) geçmişini kendi görünümünden temizler.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Yetkisiz erişim.'}, status=403)
+
+    body_data = {}
+    if request.content_type == 'application/json':
+        try:
+            body_data = json.loads(request.body)
+        except Exception:
+            pass
+    chat_type = body_data.get('chat_type') or request.POST.get('chat_type')
+    chat_id = body_data.get('chat_id') or request.POST.get('chat_id')
+
+    if not chat_type or not chat_id:
+        return JsonResponse({'status': 'error', 'message': 'Eksik parametre.'}, status=400)
+
+    if chat_type == 'dm':
+        target_user = get_object_or_404(User, id=chat_id, is_staff=True)
+        pref, _ = UserChatPreference.objects.get_or_create(user=request.user, dm_user=target_user)
+    else:
+        group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
+        pref, _ = UserChatPreference.objects.get_or_create(user=request.user, group=group)
+
+    pref.cleared_at = timezone.now()
+    pref.save()
+
+    return JsonResponse({'status': 'success', 'message': 'Sohbet geçmişi temizlendi.'})
+
+
+@login_required
+@require_POST
+def toggle_archive_chat_view(request):
+    """
+    Aktif sohbeti arşivler veya arşivden çıkarır.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Yetkisiz erişim.'}, status=403)
+
+    body_data = {}
+    if request.content_type == 'application/json':
+        try:
+            body_data = json.loads(request.body)
+        except Exception:
+            pass
+    chat_type = body_data.get('chat_type') or request.POST.get('chat_type')
+    chat_id = body_data.get('chat_id') or request.POST.get('chat_id')
+
+    if not chat_type or not chat_id:
+        return JsonResponse({'status': 'error', 'message': 'Eksik parametre.'}, status=400)
+
+    if chat_type == 'dm':
+        target_user = get_object_or_404(User, id=chat_id, is_staff=True)
+        pref, _ = UserChatPreference.objects.get_or_create(user=request.user, dm_user=target_user)
+    else:
+        group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
+        pref, _ = UserChatPreference.objects.get_or_create(user=request.user, group=group)
+
+    pref.is_archived = not pref.is_archived
+    pref.save()
+
+    return JsonResponse({'status': 'success', 'is_archived': pref.is_archived})
 
 
 @login_required
@@ -1076,29 +1429,57 @@ def get_chat_messages_api(request, chat_type, chat_id):
 
     after_id = request.GET.get('after_id')
 
+    pref = None
     if chat_type == 'dm':
         recipient = get_object_or_404(User, id=chat_id, is_staff=True)
+        pref = UserChatPreference.objects.filter(user=request.user, dm_user=recipient).first()
         messages_qs = ChatMessage.objects.filter(
             Q(sender=request.user, recipient=recipient) |
             Q(sender=recipient, recipient=request.user)
         )
     else:
         group = get_object_or_404(ChatGroup, id=chat_id, members=request.user)
+        pref = UserChatPreference.objects.filter(user=request.user, group=group).first()
         messages_qs = group.messages.all()
+
+    if pref and pref.cleared_at:
+        messages_qs = messages_qs.filter(created_at__gt=pref.cleared_at)
+
+    messages_qs = messages_qs.filter(is_deleted=False).exclude(deleted_for_users=request.user)
 
     if after_id and after_id.isdigit():
         messages_qs = messages_qs.filter(id__gt=int(after_id))
 
-    messages_qs = messages_qs.order_by('created_at')
+    messages_qs = messages_qs.order_by('created_at').prefetch_related('favorited_by')
+
+    today = timezone.localdate()
+    yesterday = today - timezone.timedelta(days=1)
 
     data = []
     for m in messages_qs:
+        now_local = timezone.localtime(m.created_at)
+        updated_local = timezone.localtime(m.updated_at) if m.updated_at else now_local
+        m_date = now_local.date()
+        if m_date == today:
+            date_display = "Bugün"
+        elif m_date == yesterday:
+            date_display = "Dün"
+        else:
+            date_display = m_date.strftime("%d.%m.%Y")
+
         data.append({
             'message_id': m.id,
             'sender_id': m.sender.id,
             'sender_name': m.sender.get_full_name() or m.sender.username,
             'content': m.content,
-            'created_at': m.created_at.strftime('%H:%M')
+            'created_at': now_local.strftime('%H:%M'),
+            'updated_at': updated_local.strftime('%H:%M') if m.is_edited else '',
+            'created_at_full': now_local.strftime('%d.%m.%Y %H:%M'),
+            'updated_at_full': updated_local.strftime('%d.%m.%Y %H:%M') if m.is_edited else '',
+            'date_key': m_date.strftime("%Y-%m-%d"),
+            'date_display': date_display,
+            'is_edited': m.is_edited,
+            'is_starred': m.favorited_by.filter(id=request.user.id).exists(),
         })
 
     return JsonResponse({'messages': data})
@@ -1780,6 +2161,10 @@ def bulk_ticket_action(request):
             messages.error(request, "Geçersiz durum seçimi.")
 
     elif action == 'assign':
+        if not is_superadmin:
+            messages.error(request, "Taleplere yetkili atama işlemini sadece Süper Yöneticiler gerçekleştirebilir!")
+            return redirect('ticket_list')
+
         if target_value == 'unassign':
             for t in tickets:
                 t.assigned_to = None
@@ -1860,7 +2245,7 @@ def bulk_ticket_action(request):
             TicketComment.objects.create(
                 ticket=primary_ticket,
                 author=request.user,
-                content=f"🔗 #{sec.ticket_number} ('{sec.title}') mükerrer talebi bu talep ile birleştirildi.",
+                content=f"🔗 #{sec.ticket_number} ('{sec.title}') yinelenen talebi bu talep ile birleştirildi.",
                 is_internal=True
             )
             TicketActivityLog.objects.create(
@@ -1920,7 +2305,7 @@ def merge_tickets_view(request):
     TicketComment.objects.create(
         ticket=primary_ticket,
         author=request.user,
-        content=f"🔗 #{secondary_ticket.ticket_number} ('{secondary_ticket.title}') mükerrer talebi bu talep ile birleştirildi.",
+        content=f"🔗 #{secondary_ticket.ticket_number} ('{secondary_ticket.title}') yinelenen talebi bu talep ile birleştirildi.",
         is_internal=True
     )
     TicketActivityLog.objects.create(
@@ -2294,6 +2679,137 @@ def ai_summarize_ticket_api(request, pk):
         'ticket_number': ticket.ticket_number,
         'summary': summary
     })
+
+
+@login_required
+@require_POST
+def create_tag_api(request):
+    """
+    Kullanıcı arayüzünden hızlıca yeni etiket tanımlama API'si.
+    Tüm giriş yapmış kullanıcılar yeni etiket oluşturabilir.
+    """
+    
+    import json
+    from django.utils.text import slugify
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = request.POST
+
+    name = data.get('name', '').strip()[:20]
+    color = '#3B82F6'  # Etiket rengi daima standart mavi
+
+    if not name:
+        return JsonResponse({'status': 'error', 'message': 'Etiket adı boş bırakılamaz.'}, status=400)
+
+    # Aynı isimde varsa mevcut olanı döndür
+    existing = TicketTag.objects.filter(name__iexact=name).first()
+    if existing:
+        return JsonResponse({
+            'status': 'success',
+            'tag': {
+                'id': existing.id,
+                'name': existing.name,
+                'color': '#3B82F6',
+                'slug': existing.slug
+            }
+        })
+
+    base_slug = slugify(name) or 'etiket'
+    slug = base_slug
+    counter = 1
+    while TicketTag.objects.filter(slug=slug).exists():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+
+    tag = TicketTag.objects.create(name=name, slug=slug, color='#3B82F6')
+    return JsonResponse({
+        'status': 'success',
+        'tag': {
+            'id': tag.id,
+            'name': tag.name,
+            'color': tag.color,
+            'slug': tag.slug
+        }
+    })
+
+
+@login_required
+def list_tags_api(request):
+    """
+    Tüm etiketleri JSON olarak listeler (Yöneticiler için düzenleme modalı).
+    """
+    tags = TicketTag.objects.all().order_by('name')
+    data = [{
+        'id': t.id,
+        'name': t.name,
+        'slug': t.slug,
+        'ticket_count': t.tickets.count()
+    } for t in tags]
+    return JsonResponse({'status': 'success', 'tags': data})
+
+
+@login_required
+@require_POST
+def edit_tag_api(request, pk):
+    """
+    Yöneticilerin mevcut bir etiketi yeniden adlandırmasını sağlar.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Etiket düzenleme yetkiniz yok.'}, status=403)
+
+    tag = get_object_or_404(TicketTag, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = request.POST
+
+    new_name = data.get('name', '').strip()[:20]
+    if not new_name:
+        return JsonResponse({'status': 'error', 'message': 'Etiket adı boş bırakılamaz.'}, status=400)
+
+    # Başka bir etiket bu ada sahip mi?
+    conflict = TicketTag.objects.filter(name__iexact=new_name).exclude(pk=tag.pk).first()
+    if conflict:
+        return JsonResponse({'status': 'error', 'message': 'Bu isimde bir etiket zaten mevcut.'}, status=400)
+
+    from django.utils.text import slugify
+    tag.name = new_name
+    base_slug = slugify(new_name) or 'etiket'
+    slug = base_slug
+    counter = 1
+    while TicketTag.objects.filter(slug=slug).exclude(pk=tag.pk).exists():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+    tag.slug = slug
+    tag.save(update_fields=['name', 'slug'])
+
+    return JsonResponse({
+        'status': 'success',
+        'tag': {
+            'id': tag.id,
+            'name': tag.name,
+            'slug': tag.slug
+        }
+    })
+
+
+@login_required
+@require_POST
+def delete_tag_api(request, pk):
+    """
+    Yöneticilerin var olan bir etiketi silmesini sağlar.
+    """
+    if not request.user.is_staff:
+        return JsonResponse({'status': 'error', 'message': 'Etiket silme yetkiniz yok.'}, status=403)
+
+    tag = get_object_or_404(TicketTag, pk=pk)
+    tag_id = tag.id
+    tag.delete()
+
+    return JsonResponse({'status': 'success', 'deleted_id': tag_id})
 
 
 # --- ÖZEL HATA SAYFALARI (404, 403, 500) GÖRÜNÜMLERİ ---

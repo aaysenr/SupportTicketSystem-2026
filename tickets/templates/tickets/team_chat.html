@@ -15,7 +15,7 @@
                 <p class="text-muted small mb-0">Genel ekip odası, özel sohbet grupları ve birebir yöneticiler arası mesajlaşma</p>
             </div>
         </div>
-        <button class="btn btn-primary fw-semibold px-3 py-2" data-bs-toggle="modal" data-bs-target="#createGroupModal">
+        <button class="btn btn-primary fw-semibold px-3 py-2 rounded-pill" data-bs-toggle="modal" data-bs-target="#createGroupModal">
             <i class="bi bi-plus-lg me-1"></i> Yeni Grup Oluştur
         </button>
     </div>
@@ -26,38 +26,71 @@
     <div class="col-lg-4">
         <!-- GENEL VE ÖZEL GRUPLAR -->
         <div class="card border-0 shadow-sm mb-3">
-            <div class="card-header bg-white py-3 border-0 fw-bold text-dark">
-                <i class="bi bi-people-fill text-primary me-2"></i>Sohbet Odaları & Gruplar
+            <div class="card-header bg-white py-3 border-0 fw-bold text-dark d-flex align-items-center">
+                <span class="bg-primary-subtle text-primary p-2 rounded-circle me-2 d-inline-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
+                    <i class="bi bi-people-fill"></i>
+                </span>
+                <span>Sohbet Odaları & Gruplar</span>
             </div>
             <div class="list-group list-group-flush">
                 <!-- GENEL ODA -->
                 <a href="{% url 'team_chat' %}" 
                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-3 {% if active_channel.type == 'group' and active_channel.id == general_group.id %}active bg-primary border-primary{% endif %}">
-                    <div>
-                        <i class="bi bi-globe me-2"></i><strong>Genel Ekip Odası</strong>
-                        <div class="small text-truncate {% if active_channel.type == 'group' and active_channel.id == general_group.id %}text-white-50{% else %}text-muted{% endif %}">Tüm yöneticilerin ortak kanalı</div>
+                    <div class="d-flex align-items-center">
+                        <span class="badge {% if active_channel.type == 'group' and active_channel.id == general_group.id %}bg-white text-primary{% else %}bg-primary-subtle text-primary{% endif %} rounded-circle p-2 me-2">
+                            <i class="bi bi-globe fs-6"></i>
+                        </span>
+                        <div>
+                            <strong>Genel Ekip Odası</strong>
+                            <div class="small text-truncate {% if active_channel.type == 'group' and active_channel.id == general_group.id %}text-white-50{% else %}text-muted{% endif %}">Tüm yöneticilerin ortak kanalı</div>
+                        </div>
                     </div>
-                    <span class="badge bg-light text-primary rounded-pill fw-bold">Genel</span>
+                    <span class="badge {% if active_channel.type == 'group' and active_channel.id == general_group.id %}bg-white text-primary{% else %}bg-light text-primary{% endif %} rounded-pill fw-bold">Genel</span>
                 </a>
 
                 <!-- KULLANICI ÖZEL GRUPLARI -->
                 {% for grp in user_groups %}
                 <a href="{% url 'team_chat_detail' 'group' grp.id %}" 
                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-3 {% if active_channel.type == 'group' and active_channel.id == grp.id %}active bg-primary border-primary{% endif %}">
-                    <div>
-                        <i class="bi bi-bounding-box-circles me-2"></i><strong>{{ grp.name }}</strong>
-                        <div class="small {% if active_channel.type == 'group' and active_channel.id == grp.id %}text-white-50{% else %}text-muted{% endif %}">{{ grp.members.count }} Üye</div>
+                    <div class="d-flex align-items-center">
+                        <span class="badge {% if active_channel.type == 'group' and active_channel.id == grp.id %}bg-white text-primary{% else %}bg-primary-subtle text-primary{% endif %} rounded-circle p-2 me-2">
+                            <i class="bi bi-people-fill fs-6"></i>
+                        </span>
+                        <div>
+                            <strong>{{ grp.name }}</strong>
+                            <div class="small {% if active_channel.type == 'group' and active_channel.id == grp.id %}text-white-50{% else %}text-muted{% endif %}">{{ grp.members.count }} Üye</div>
+                        </div>
                     </div>
-                    <span class="badge bg-secondary rounded-pill">Grup</span>
+                    <span class="badge {% if active_channel.type == 'group' and active_channel.id == grp.id %}bg-white text-primary{% else %}bg-primary-subtle text-primary border border-primary-subtle{% endif %} rounded-pill">Grup</span>
                 </a>
                 {% endfor %}
+
+                {% if archived_groups %}
+                <div class="p-2 bg-light border-top">
+                    <a class="btn btn-sm btn-link text-decoration-none text-muted w-100 text-start py-1" data-bs-toggle="collapse" href="#archivedGroupsCollapse">
+                        <i class="bi bi-archive me-1"></i> Arşivlenmiş Gruplar ({{ archived_groups|length }}) <i class="bi bi-chevron-down float-end"></i>
+                    </a>
+                    <div class="collapse mt-1" id="archivedGroupsCollapse">
+                        {% for grp in archived_groups %}
+                        <a href="{% url 'team_chat_detail' 'group' grp.id %}" class="list-group-item list-group-item-action py-2 rounded mb-1 small text-muted">
+                            <i class="bi bi-archive me-1 text-secondary"></i> {{ grp.name }}
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
 
         <!-- YÖNETİCİLER REHBERİ (DM) -->
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white py-3 border-0 fw-bold text-dark d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-person-lines-fill text-primary me-2"></i>Yöneticiler Rehberi</span>
+                <span class="d-flex align-items-center">
+                    <span class="bg-primary-subtle text-primary p-2 rounded-circle me-2 d-inline-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
+                        <i class="bi bi-person-lines-fill"></i>
+                    </span>
+                    <span>Yöneticiler Rehberi</span>
+                </span>
                 <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill">{{ managers.count }} Yönetici</span>
             </div>
             <div class="list-group list-group-flush style-scroll" style="max-height: 320px; overflow-y: auto;">
@@ -80,6 +113,9 @@
                         </div>
                     </div>
                     <div class="text-end">
+                        {% if mgr.is_dm_archived %}
+                        <span class="badge bg-secondary-subtle text-secondary rounded-pill small me-1" title="Arşivlenmiş Sohbet"><i class="bi bi-archive"></i></span>
+                        {% endif %}
                         <span class="badge {% if mgr.active_tickets_count > 0 %}bg-warning text-dark{% else %}bg-light text-muted{% endif %} rounded-pill small" title="{{ mgr.get_full_name|default:mgr.username }} kullanıcısına atanmış aktif destek talep sayısı">
                             {{ mgr.active_tickets_count }} Talep
                         </span>
@@ -95,40 +131,123 @@
         <div class="card border-0 shadow-sm h-100 d-flex flex-column">
             <!-- SOHBET BAŞLIĞI -->
             <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
-                <h5 class="card-title mb-0 fw-bold text-dark">
-                    {{ active_channel.title }}
+                <h5 class="card-title mb-0 fw-bold text-dark d-flex align-items-center">
+                    {% if active_channel.type == 'group' %}
+                        {% if active_channel.id == general_group.id %}
+                            <span class="d-inline-flex align-items-center justify-content-center bg-primary-subtle text-primary rounded-circle me-2" style="width: 38px; height: 38px;">
+                                <i class="bi bi-globe fs-5"></i>
+                            </span>
+                        {% else %}
+                            <span class="d-inline-flex align-items-center justify-content-center bg-primary-subtle text-primary rounded-circle me-2" style="width: 38px; height: 38px;">
+                                <i class="bi bi-people-fill fs-5"></i>
+                            </span>
+                        {% endif %}
+                    {% elif active_channel.type == 'dm' %}
+                        <span class="d-inline-flex align-items-center justify-content-center bg-primary-subtle text-primary rounded-circle me-2" style="width: 38px; height: 38px;">
+                            <i class="bi bi-chat-dots-fill fs-5"></i>
+                        </span>
+                    {% endif %}
+                    <span>{{ active_channel.title }}</span>
+                    {% if active_channel.is_archived %}
+                    <span class="badge bg-secondary-subtle text-secondary ms-2 small"><i class="bi bi-archive me-1"></i>Arşivlendi</span>
+                    {% endif %}
                 </h5>
-                <span id="connectionBadge" class="badge bg-primary bg-opacity-10 text-primary px-3 py-1.5 rounded-pill">
-                    <i id="connectionDot" class="bi bi-circle-fill text-success fs-6 me-1" style="font-size: 0.5rem !important;"></i> 
-                    <span id="connectionStatusText">Bağlanıyor...</span>
-                </span>
+                <div class="d-flex align-items-center gap-2">
+                    <span id="connectionBadge" class="badge bg-primary bg-opacity-10 text-primary px-3 py-1.5 rounded-pill">
+                        <i id="connectionDot" class="bi bi-circle-fill text-success fs-6 me-1" style="font-size: 0.5rem !important;"></i> 
+                        <span id="connectionStatusText">Bağlanıyor...</span>
+                    </span>
+
+                    <!-- SOHBET SEÇENEKLERİ MENÜSÜ -->
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-light rounded-circle p-1 px-2 border-0" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Sohbet Seçenekleri">
+                            <i class="bi bi-three-dots-vertical"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow border-0">
+                            <li>
+                                <button class="dropdown-item py-2 small" id="btnToggleArchiveChat">
+                                    <i class="bi bi-archive me-2 text-primary"></i>
+                                    {% if active_channel.is_archived %}Sohbeti Arşivden Çıkar{% else %}Sohbeti Arşivle{% endif %}
+                                </button>
+                            </li>
+                            <li>
+                                <button class="dropdown-item py-2 small text-danger" id="btnClearChatHistory">
+                                    <i class="bi bi-trash3 me-2"></i>Sohbeti Temizle
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
             </div>
 
             <!-- MESAJLAR ALANI -->
             <div class="card-body p-4 flex-grow-1 style-scroll" id="chatBox" style="height: 480px; overflow-y: auto; background-color: #f8fafc;">
+                {% now "Y-m-d" as today_str %}
                 {% for msg in chat_messages %}
-                <div class="d-flex mb-3 {% if msg.sender == user %}justify-content-end{% else %}justify-content-start align-items-end{% endif %}" data-message-id="{{ msg.id }}">
-                    {% if msg.sender != user %}
-                        {% if msg.sender.profile.avatar_url %}
-                            <img src="{{ msg.sender.profile.avatar_url }}" alt="{{ msg.sender.username }}" class="rounded-circle me-2 mb-1 border shadow-sm flex-shrink-0" style="width: 32px; height: 32px; object-fit: cover;">
-                        {% else %}
-                            <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center fw-bold me-2 mb-1 flex-shrink-0" style="width: 32px; height: 32px; font-size: 0.75rem;">
-                                {{ msg.sender.username|slice:":2"|upper }}
-                            </div>
-                        {% endif %}
-                    {% endif %}
-                    <div class="message-bubble p-3 rounded-3 shadow-sm {% if msg.sender == user %}bg-primary text-white ms-5{% else %}bg-white text-dark me-5 border{% endif %}" style="max-width: 75%;">
-                        {% if msg.sender != user %}
-                        <div class="fw-bold small text-primary mb-1">{{ msg.sender.get_full_name|default:msg.sender.username }}</div>
-                        {% endif %}
-                        <div class="message-content text-break">{{ msg.content }}</div>
-                        <div class="text-end mt-1" style="font-size: 0.7rem; opacity: 0.8;">{{ msg.created_at|date:"H:i" }}</div>
+                    <!-- GÜN BAZLI AYRAÇ (WHATSAPP TARZI) -->
+                    {% ifchanged msg.created_at|date:"Y-m-d" %}
+                    <div class="text-center my-3 date-divider-row" data-date="{{ msg.created_at|date:'Y-m-d' }}">
+                        <span class="badge bg-white text-secondary border shadow-xs px-3 py-1.5 rounded-pill small fw-semibold">
+                            {% if msg.created_at|date:"Y-m-d" == today_str %}
+                                Bugün
+                            {% else %}
+                                {{ msg.created_at|date:"d F Y" }}
+                            {% endif %}
+                        </span>
                     </div>
-                </div>
+                    {% endifchanged %}
+
+                    <!-- MESAJ BALONU -->
+                    <div class="d-flex mb-3 message-row {% if msg.sender == user %}justify-content-end{% else %}justify-content-start align-items-end{% endif %}" data-message-id="{{ msg.id }}" data-sender-id="{{ msg.sender.id }}" data-date-key="{{ msg.created_at|date:'Y-m-d' }}">
+                        {% if msg.sender != user %}
+                            {% if msg.sender.profile.avatar_url %}
+                                <img src="{{ msg.sender.profile.avatar_url }}" alt="{{ msg.sender.username }}" class="rounded-circle me-2 mb-1 border shadow-sm flex-shrink-0" style="width: 32px; height: 32px; object-fit: cover;">
+                            {% else %}
+                                <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center fw-bold me-2 mb-1 flex-shrink-0" style="width: 32px; height: 32px; font-size: 0.75rem;">
+                                    {{ msg.sender.username|slice:":2"|upper }}
+                                </div>
+                            {% endif %}
+                        {% endif %}
+                        <div class="message-bubble p-3 rounded-3 shadow-sm position-relative group-hover-actions {% if msg.sender == user %}bg-primary text-white ms-5{% else %}bg-white text-dark me-5 border{% endif %}" style="max-width: 75%;">
+                            {% if msg.sender != user %}
+                            <div class="fw-bold small text-primary mb-1">{{ msg.sender.get_full_name|default:msg.sender.username }}</div>
+                            {% endif %}
+                            <div class="message-content text-break">{{ msg.content }}</div>
+                            <!-- ALT BİLGİ: DÜZENLENDİ, SAAT VE AKSİYON İKONLARI -->
+                            <div class="d-flex align-items-center justify-content-end mt-1.5 pt-0.5" style="font-size: 0.72rem;">
+                                <!-- Zaman ve Düzenlendi Durumu -->
+                                <div class="d-flex align-items-center text-nowrap" style="opacity: 0.85;">
+                                    <span class="badge-edited {% if not msg.is_edited %}d-none{% endif %} fst-italic me-1" style="font-size: 0.65rem;" title="Düzenlendi: {{ msg.updated_at|date:'d.m.Y H:i' }}">(düzenlendi)</span>
+                                    <span class="message-time" title="Gönderildi: {{ msg.created_at|date:'d.m.Y H:i' }}{% if msg.is_edited %} • Düzenlendi: {{ msg.updated_at|date:'d.m.Y H:i' }}{% endif %}">{{ msg.created_at|date:"H:i" }}</span>
+                                </div>
+
+                                <!-- Aksiyon Butonları (Yıldız, Düzenle, Sil) -->
+                                <div class="d-flex align-items-center gap-2 ms-2 ps-2 border-start {% if msg.sender == user %}border-white border-opacity-25{% else %}border-secondary border-opacity-25{% endif %}">
+                                    <!-- Favorileme / Yıldız -->
+                                    <button type="button" class="btn btn-sm btn-link p-0 text-warning border-0 btn-toggle-star d-inline-flex align-items-center justify-content-center" data-message-id="{{ msg.id }}" title="Yıldızla / Favorile" style="width: 20px; height: 20px; line-height: 1;">
+                                        <i class="bi {% if user in msg.favorited_by.all %}bi-star-fill text-warning{% else %}bi-star {% if msg.sender == user %}text-white-50{% else %}text-muted{% endif %}{% endif %}" style="font-size: 0.8rem;"></i>
+                                    </button>
+                                    <!-- Düzenleme (Sadece Mesaj Sahibi) & Silme (Her Yönetici) -->
+                                    {% if msg.sender == user %}
+                                    <button type="button" class="btn btn-sm btn-link p-0 text-white border-0 opacity-75 hover-opacity-100 btn-edit-message d-inline-flex align-items-center justify-content-center" data-message-id="{{ msg.id }}" title="Düzenle" style="width: 20px; height: 20px; line-height: 1;">
+                                        <i class="bi bi-pencil-fill" style="font-size: 0.72rem;"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-link p-0 text-white border-0 opacity-75 hover-opacity-100 btn-delete-message d-inline-flex align-items-center justify-content-center" data-message-id="{{ msg.id }}" data-is-me="true" title="Sil" style="width: 20px; height: 20px; line-height: 1;">
+                                        <i class="bi bi-trash3-fill" style="font-size: 0.72rem;"></i>
+                                    </button>
+                                    {% else %}
+                                    <button type="button" class="btn btn-sm btn-link p-0 text-danger border-0 opacity-75 hover-opacity-100 btn-delete-message d-inline-flex align-items-center justify-content-center" data-message-id="{{ msg.id }}" data-is-me="false" title="Benden Sil" style="width: 20px; height: 20px; line-height: 1;">
+                                        <i class="bi bi-trash3-fill" style="font-size: 0.72rem;"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 {% empty %}
                 <div id="noMessagesPlaceholder" class="text-center text-muted my-5 py-5">
-                    <i class="bi bi-chat-dots display-4 d-block mb-3 opacity-50"></i>
-                    <h6 class="fw-bold">Henüz mesaj bulunmuyor</h6>
+                    <i class="bi bi-chat-dots display-4 d-block mb-3 opacity-50 text-primary"></i>
+                    <h6 class="fw-bold text-dark">Henüz mesaj bulunmuyor</h6>
                     <p class="small mb-0">İlk mesajı siz göndererek sohbeti başlatabilirsiniz.</p>
                 </div>
                 {% endfor %}
@@ -197,10 +316,91 @@
                     </div>
                 </div>
                 <div class="modal-footer border-0 pt-0">
-                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">İptal</button>
-                    <button type="submit" class="btn btn-primary fw-semibold px-4">Grup Oluştur</button>
+                    <button type="button" class="btn btn-light rounded-pill px-3" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary fw-semibold px-4 rounded-pill">Grup Oluştur</button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+
+<!-- MESAJ DÜZENLEME MODALI -->
+<div class="modal fade" id="editMessageModal" tabindex="-1" aria-labelledby="editMessageModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-primary text-white py-3">
+                <h6 class="modal-title fw-bold" id="editMessageModalLabel">
+                    <i class="bi bi-pencil-square me-2"></i>Mesajı Düzenle
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <form id="editMessageForm">
+                <div class="modal-body p-3">
+                    <input type="hidden" id="modalEditMessageId">
+                    <div class="mb-2">
+                        <textarea id="modalEditMessageContent" class="form-control" rows="3" required placeholder="Mesajınızı güncelleyin..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light p-2">
+                    <button type="button" class="btn btn-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary btn-sm rounded-pill px-4 fw-semibold" id="btnSaveEditedMessage">
+                        <i class="bi bi-check-lg me-1"></i> Güncelle
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- MESAJ SİLME SEÇENEKLERİ MODALI (KENDİ MESAJI İÇİN) -->
+<div class="modal fade" id="deleteChoiceModal" tabindex="-1" aria-labelledby="deleteChoiceModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-danger text-white py-2">
+                <h6 class="modal-title fw-bold" id="deleteChoiceModalLabel">
+                    <i class="bi bi-trash3-fill me-1"></i> Mesajı Sil
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body text-center p-3">
+                <input type="hidden" id="modalDeleteMessageId">
+                <p class="small text-muted mb-3">Bu mesajı sadece kendi sohbetinizden mi yoksa tüm katılımcılardan mı silmek istersiniz?</p>
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-danger btn-sm rounded-pill fw-semibold py-2" id="btnDeleteForEveryone">
+                        <i class="bi bi-people-fill me-1"></i> Herkesten Sil
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill fw-semibold py-2" id="btnDeleteForMe">
+                        <i class="bi bi-person-fill me-1"></i> Benden Sil
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer bg-light p-2 justify-content-center">
+                <button type="button" class="btn btn-link btn-sm text-secondary text-decoration-none" data-bs-dismiss="modal">Vazgeç</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- BAŞKASININ MESAJINI BENDEN SİL ONAY MODALI -->
+<div class="modal fade" id="confirmDeleteForMeModal" tabindex="-1" aria-labelledby="confirmDeleteForMeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-secondary text-white py-2">
+                <h6 class="modal-title fw-bold" id="confirmDeleteForMeModalLabel">
+                    <i class="bi bi-trash3 me-1"></i> Mesajı Benden Sil
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body text-center p-3">
+                <input type="hidden" id="modalOtherDeleteMessageId">
+                <p class="small text-muted mb-0">Bu mesaj sadece sizin sohbetinizden silinecek. Diğer katılımcılar mesajı görmeye devam edecektir. Onaylıyor musunuz?</p>
+            </div>
+            <div class="modal-footer bg-light p-2">
+                <button type="button" class="btn btn-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">İptal</button>
+                <button type="button" class="btn btn-danger btn-sm rounded-pill px-3 fw-semibold" id="btnConfirmDeleteForMe">
+                    <i class="bi bi-trash3-fill me-1"></i> Benden Sil
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -217,6 +417,7 @@
         const currentUserId = {{ user.id }};
         const chatType = "{{ active_channel.type }}";
         const chatId = "{{ active_channel.id }}";
+        const csrfToken = "{{ csrf_token }}";
 
         let socket = null;
         let pollingInterval = null;
@@ -250,6 +451,22 @@
             }
         }
 
+        function ensureDateDivider(dateKey, dateDisplay) {
+            if (!dateKey) return;
+            const existingDivider = chatBox.querySelector(`.date-divider-row[data-date="${dateKey}"]`);
+            if (!existingDivider) {
+                const divider = document.createElement('div');
+                divider.className = 'text-center my-3 date-divider-row';
+                divider.setAttribute('data-date', dateKey);
+                divider.innerHTML = `
+                    <span class="badge bg-white text-secondary border shadow-xs px-3 py-1.5 rounded-pill small fw-semibold">
+                        ${dateDisplay || dateKey}
+                    </span>
+                `;
+                chatBox.appendChild(divider);
+            }
+        }
+
         function appendMessage(msg) {
             const placeholder = document.getElementById('noMessagesPlaceholder');
             if (placeholder) placeholder.remove();
@@ -260,13 +477,19 @@
                 if (msg.message_id > lastMessageId) lastMessageId = msg.message_id;
             }
 
+            // WhatsApp tarzı tarih ayracı ekle
+            if (msg.date_key) {
+                ensureDateDivider(msg.date_key, msg.date_display);
+            }
+
             const isMe = msg.sender_id === currentUserId;
             const div = document.createElement('div');
-            div.className = `d-flex mb-3 ${isMe ? 'justify-content-end' : 'justify-content-start'}`;
+            div.className = `d-flex mb-3 message-row ${isMe ? 'justify-content-end' : 'justify-content-start align-items-end'}`;
             if (msg.message_id) div.setAttribute('data-message-id', msg.message_id);
+            if (msg.date_key) div.setAttribute('data-date-key', msg.date_key);
 
             const bubble = document.createElement('div');
-            bubble.className = `message-bubble p-3 rounded-3 shadow-sm ${isMe ? 'bg-primary text-white ms-5' : 'bg-white text-dark me-5 border'}`;
+            bubble.className = `message-bubble p-3 rounded-3 shadow-sm position-relative group-hover-actions ${isMe ? 'bg-primary text-white ms-5' : 'bg-white text-dark me-5 border'}`;
             bubble.style.maxWidth = '75%';
 
             if (!isMe) {
@@ -275,7 +498,7 @@
                 senderDiv.textContent = msg.sender_name || '';
                 bubble.appendChild(senderDiv);
 
-                // Sesli ve Masaüstü Bildirimi (Arka planda veya ekranda)
+                // Sesli ve Masaüstü Bildirimi
                 if (typeof window.playNotificationSound === 'function') {
                     window.playNotificationSound();
                 }
@@ -292,13 +515,89 @@
             contentDiv.textContent = msg.content || '';
             bubble.appendChild(contentDiv);
 
-            const timeDiv = document.createElement('div');
-            timeDiv.className = 'text-end mt-1';
-            timeDiv.style.fontSize = '0.7rem';
-            timeDiv.style.opacity = '0.8';
-            timeDiv.textContent = msg.created_at || '';
-            bubble.appendChild(timeDiv);
+            // Alt bilgi satırı (Düzenlendi, Saat | Favori, Sil/Düzenle)
+            const footerDiv = document.createElement('div');
+            footerDiv.className = 'd-flex align-items-center justify-content-end mt-1.5 pt-0.5';
+            footerDiv.style.fontSize = '0.72rem';
 
+            // Zaman alanı
+            const timeContainer = document.createElement('div');
+            timeContainer.className = 'd-flex align-items-center text-nowrap';
+            timeContainer.style.opacity = '0.85';
+
+            const editedSpan = document.createElement('span');
+            editedSpan.className = `badge-edited ${msg.is_edited ? '' : 'd-none'} fst-italic me-1`;
+            editedSpan.style.fontSize = '0.65rem';
+            editedSpan.textContent = '(düzenlendi)';
+            if (msg.updated_at_full) {
+                editedSpan.title = `Düzenlendi: ${msg.updated_at_full}`;
+            }
+            timeContainer.appendChild(editedSpan);
+
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'message-time';
+            timeSpan.textContent = msg.created_at || '';
+            const createdFull = msg.created_at_full || (msg.date_display ? `${msg.date_display} ${msg.created_at}` : msg.created_at);
+            const updatedFull = msg.updated_at_full ? ` • Düzenlendi: ${msg.updated_at_full}` : '';
+            timeSpan.title = `Gönderildi: ${createdFull}${updatedFull}`;
+            timeContainer.appendChild(timeSpan);
+            footerDiv.appendChild(timeContainer);
+
+            // Aksiyon butonları kapsayıcısı
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = `d-flex align-items-center gap-2 ms-2 ps-2 border-start ${isMe ? 'border-white border-opacity-25' : 'border-secondary border-opacity-25'}`;
+
+            // Yıldız butonu
+            const starBtn = document.createElement('button');
+            starBtn.type = 'button';
+            starBtn.className = 'btn btn-sm btn-link p-0 text-warning border-0 btn-toggle-star d-inline-flex align-items-center justify-content-center';
+            starBtn.setAttribute('data-message-id', msg.message_id);
+            starBtn.title = 'Yıldızla / Favorile';
+            starBtn.style.width = '20px';
+            starBtn.style.height = '20px';
+            starBtn.style.lineHeight = '1';
+            starBtn.innerHTML = `<i class="bi ${msg.is_starred ? 'bi-star-fill text-warning' : (isMe ? 'bi-star text-white-50' : 'bi-star text-muted')}" style="font-size: 0.8rem;"></i>`;
+            actionsDiv.appendChild(starBtn);
+
+            if (isMe) {
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.className = 'btn btn-sm btn-link p-0 text-white border-0 opacity-75 hover-opacity-100 btn-edit-message d-inline-flex align-items-center justify-content-center';
+                editBtn.setAttribute('data-message-id', msg.message_id);
+                editBtn.title = 'Düzenle';
+                editBtn.style.width = '20px';
+                editBtn.style.height = '20px';
+                editBtn.style.lineHeight = '1';
+                editBtn.innerHTML = '<i class="bi bi-pencil-fill" style="font-size: 0.72rem;"></i>';
+                actionsDiv.appendChild(editBtn);
+
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'btn btn-sm btn-link p-0 text-white border-0 opacity-75 hover-opacity-100 btn-delete-message d-inline-flex align-items-center justify-content-center';
+                delBtn.setAttribute('data-message-id', msg.message_id);
+                delBtn.setAttribute('data-is-me', 'true');
+                delBtn.title = 'Sil';
+                delBtn.style.width = '20px';
+                delBtn.style.height = '20px';
+                delBtn.style.lineHeight = '1';
+                delBtn.innerHTML = '<i class="bi bi-trash3-fill" style="font-size: 0.72rem;"></i>';
+                actionsDiv.appendChild(delBtn);
+            } else {
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'btn btn-sm btn-link p-0 text-danger border-0 opacity-75 hover-opacity-100 btn-delete-message d-inline-flex align-items-center justify-content-center';
+                delBtn.setAttribute('data-message-id', msg.message_id);
+                delBtn.setAttribute('data-is-me', 'false');
+                delBtn.title = 'Benden Sil';
+                delBtn.style.width = '20px';
+                delBtn.style.height = '20px';
+                delBtn.style.lineHeight = '1';
+                delBtn.innerHTML = '<i class="bi bi-trash3-fill" style="font-size: 0.72rem;"></i>';
+                actionsDiv.appendChild(delBtn);
+            }
+
+            footerDiv.appendChild(actionsDiv);
+            bubble.appendChild(footerDiv);
             div.appendChild(bubble);
             chatBox.appendChild(div);
             scrollToBottom();
@@ -314,7 +613,6 @@
 
                 socket.onopen = function () {
                     setStatus('ws', 'Canlı (WebSocket)');
-                    // WebSocket aktifse polling'i durdur
                     if (pollingInterval) {
                         clearInterval(pollingInterval);
                         pollingInterval = null;
@@ -337,6 +635,34 @@
                                     typingBox.classList.remove('d-flex');
                                 }
                             }
+                        } else if (data.type === 'message_edited') {
+                            const msgEl = document.querySelector(`[data-message-id="${data.message_id}"]`);
+                            if (msgEl) {
+                                const contentEl = msgEl.querySelector('.message-content');
+                                const editedBadge = msgEl.querySelector('.badge-edited');
+                                const timeSpan = msgEl.querySelector('.message-time');
+                                if (contentEl) contentEl.innerHTML = data.content;
+                                if (editedBadge) {
+                                    editedBadge.classList.remove('d-none');
+                                    if (data.updated_at_full) {
+                                        editedBadge.title = `Düzenlendi: ${data.updated_at_full}`;
+                                    }
+                                }
+                                if (timeSpan && data.updated_at_full) {
+                                    const currentTitle = timeSpan.getAttribute('title') || `Gönderildi: ${timeSpan.textContent}`;
+                                    if (!currentTitle.includes('Düzenlendi:')) {
+                                        timeSpan.setAttribute('title', `${currentTitle} • Düzenlendi: ${data.updated_at_full}`);
+                                    } else {
+                                        const parts = currentTitle.split('•')[0].trim();
+                                        timeSpan.setAttribute('title', `${parts} • Düzenlendi: ${data.updated_at_full}`);
+                                    }
+                                }
+                            }
+                        } else if (data.type === 'message_deleted' || data.type === 'message_deleted_for_me') {
+                            const msgEl = document.querySelector(`[data-message-id="${data.message_id}"]`);
+                            if (msgEl) {
+                                msgEl.remove();
+                            }
                         } else if (data.status === 'success') {
                             const typingBox = document.getElementById('teamChatTyping');
                             if (typingBox) {
@@ -351,7 +677,6 @@
                 };
 
                 socket.onclose = function () {
-                    // WebSocket kapanırsa güvenle Polling Fallback'e geç
                     setStatus('poll', 'Canlı (Akıllı Polling)');
                     startPollingFallback();
                 };
@@ -366,7 +691,7 @@
             }
         }
 
-        // 2. AKILLI & ADAPTİF POLLING FALLBACK (Yalnızca Yeni Mesajları Çeker)
+        // 2. AKILLI & ADAPTİF POLLING FALLBACK
         function fetchNewMessages() {
             const apiUrl = `/team-chat/api/messages/${chatType}/${chatId}/?after_id=${lastMessageId}`;
 
@@ -382,9 +707,7 @@
 
         function startPollingFallback() {
             if (pollingInterval) return;
-            // İlk kontrol
             fetchNewMessages();
-            // Sayfa görünürlüğüne duyarlı polling (Sekme arka plandaysa sunucuyu yormaz)
             pollingInterval = setInterval(() => {
                 if (!document.hidden) {
                     fetchNewMessages();
@@ -392,18 +715,16 @@
             }, 3000);
         }
 
-        // 3. MESAJ GÖNDERME (Dual Engine: WebSocket veya HTTP AJAX)
+        // 3. MESAJ GÖNDERME
         chatForm.addEventListener('submit', function (e) {
             e.preventDefault();
             const content = messageInput.value.trim();
             if (!content) return;
 
             if (socket && socket.readyState === WebSocket.OPEN) {
-                // WebSocket üzerinden anında gönder
                 socket.send(JSON.stringify({ content: content }));
                 messageInput.value = '';
             } else {
-                // WebSocket hazır değilse güvenli AJAX POST Fallback
                 const formData = new FormData(chatForm);
                 fetch("{% url 'send_chat_message' %}", {
                     method: 'POST',
@@ -423,7 +744,7 @@
             }
         });
 
-        // 4. Kullanıcı Yazıyor... Sinyali Gönderimi
+        // 4. Kullanıcı Yazıyor Göstergesi
         let teamTypingTimer = null;
         messageInput.addEventListener('input', function () {
             if (socket && socket.readyState === WebSocket.OPEN) {
@@ -443,6 +764,250 @@
                 }, 2500);
             }
         });
+
+        // 5. Mesaj Tıklama Olayları (Yıldızla, Düzenle, Sil)
+        chatBox.addEventListener('click', function (e) {
+            // Favorile / Yıldız
+            const starBtn = e.target.closest('.btn-toggle-star');
+            if (starBtn) {
+                const msgId = starBtn.getAttribute('data-message-id');
+                fetch(`/team-chat/api/message/${msgId}/star/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const icon = starBtn.querySelector('i');
+                        if (data.is_favorited) {
+                            icon.className = 'bi bi-star-fill text-warning';
+                        } else {
+                            const isMe = starBtn.closest('.message-bubble').classList.contains('bg-primary');
+                            icon.className = `bi bi-star ${isMe ? 'text-white-50' : 'text-muted'}`;
+                        }
+                    }
+                });
+                return;
+            }
+
+            // Düzenle
+            const editBtn = e.target.closest('.btn-edit-message');
+            if (editBtn) {
+                const msgId = editBtn.getAttribute('data-message-id');
+                const row = editBtn.closest('.message-row');
+                const contentEl = row.querySelector('.message-content');
+                const currentText = contentEl ? contentEl.textContent.trim() : '';
+
+                document.getElementById('modalEditMessageId').value = msgId;
+                document.getElementById('modalEditMessageContent').value = currentText;
+
+                const editModalEl = document.getElementById('editMessageModal');
+                const editModal = bootstrap.Modal.getInstance(editModalEl) || new bootstrap.Modal(editModalEl);
+                editModal.show();
+                return;
+            }
+
+            // Sil Butonu Tıklaması (Benden Sil vs Herkesten Sil Seçimi)
+            const delBtn = e.target.closest('.btn-delete-message');
+            if (delBtn) {
+                const msgId = delBtn.getAttribute('data-message-id');
+                const isMe = delBtn.getAttribute('data-is-me') === 'true' || delBtn.closest('.message-bubble').classList.contains('bg-primary');
+
+                if (isMe) {
+                    // Kendi mesajı: Herkesten Sil veya Benden Sil seçimi sun
+                    document.getElementById('modalDeleteMessageId').value = msgId;
+                    const choiceModalEl = document.getElementById('deleteChoiceModal');
+                    const choiceModal = bootstrap.Modal.getInstance(choiceModalEl) || new bootstrap.Modal(choiceModalEl);
+                    choiceModal.show();
+                } else {
+                    // Başkasının mesajı: Sadece kendi sohbetinden silebilir ('Benden Sil')
+                    document.getElementById('modalOtherDeleteMessageId').value = msgId;
+                    const otherModalEl = document.getElementById('confirmDeleteForMeModal');
+                    const otherModal = bootstrap.Modal.getInstance(otherModalEl) || new bootstrap.Modal(otherModalEl);
+                    otherModal.show();
+                }
+                return;
+            }
+        });
+
+        // Ortak Mesaj Silme Fonksiyonu
+        function executeDeleteMessage(msgId, mode) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'delete_message',
+                    message_id: msgId,
+                    mode: mode
+                }));
+            } else {
+                fetch(`/team-chat/api/message/${msgId}/delete/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ mode: mode })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const row = document.querySelector(`[data-message-id="${msgId}"]`);
+                        if (row) row.remove();
+                    }
+                });
+            }
+        }
+
+        // Kendi Mesajı - Herkesten Sil Butonu
+        const btnDeleteForEveryone = document.getElementById('btnDeleteForEveryone');
+        if (btnDeleteForEveryone) {
+            btnDeleteForEveryone.addEventListener('click', function () {
+                const msgId = document.getElementById('modalDeleteMessageId').value;
+                if (!msgId) return;
+                executeDeleteMessage(msgId, 'for_everyone');
+                const choiceModalEl = document.getElementById('deleteChoiceModal');
+                const choiceModal = bootstrap.Modal.getInstance(choiceModalEl);
+                if (choiceModal) choiceModal.hide();
+            });
+        }
+
+        // Kendi Mesajı - Benden Sil Butonu
+        const btnDeleteForMe = document.getElementById('btnDeleteForMe');
+        if (btnDeleteForMe) {
+            btnDeleteForMe.addEventListener('click', function () {
+                const msgId = document.getElementById('modalDeleteMessageId').value;
+                if (!msgId) return;
+                executeDeleteMessage(msgId, 'for_me');
+                const choiceModalEl = document.getElementById('deleteChoiceModal');
+                const choiceModal = bootstrap.Modal.getInstance(choiceModalEl);
+                if (choiceModal) choiceModal.hide();
+            });
+        }
+
+        // Başkasının Mesajı - Benden Sil Onay Butonu
+        const btnConfirmDeleteForMe = document.getElementById('btnConfirmDeleteForMe');
+        if (btnConfirmDeleteForMe) {
+            btnConfirmDeleteForMe.addEventListener('click', function () {
+                const msgId = document.getElementById('modalOtherDeleteMessageId').value;
+                if (!msgId) return;
+                executeDeleteMessage(msgId, 'for_me');
+                const otherModalEl = document.getElementById('confirmDeleteForMeModal');
+                const otherModal = bootstrap.Modal.getInstance(otherModalEl);
+                if (otherModal) otherModal.hide();
+            });
+        }
+
+        // Mesaj Düzenleme Formu Gönderimi
+        const editMessageForm = document.getElementById('editMessageForm');
+        if (editMessageForm) {
+            editMessageForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                const msgId = document.getElementById('modalEditMessageId').value;
+                const newText = document.getElementById('modalEditMessageContent').value.trim();
+                if (!newText) return;
+
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'edit_message',
+                        message_id: msgId,
+                        content: newText
+                    }));
+                    const editModalEl = document.getElementById('editMessageModal');
+                    const editModal = bootstrap.Modal.getInstance(editModalEl);
+                    if (editModal) editModal.hide();
+                } else {
+                    fetch(`/team-chat/api/message/${msgId}/edit/`, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': csrfToken,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ content: newText })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            const msgEl = document.querySelector(`[data-message-id="${msgId}"]`);
+                            if (msgEl) {
+                                const contentEl = msgEl.querySelector('.message-content');
+                                const editedBadge = msgEl.querySelector('.badge-edited');
+                                const timeSpan = msgEl.querySelector('.message-time');
+                                if (contentEl) contentEl.innerHTML = data.content;
+                                if (editedBadge) {
+                                    editedBadge.classList.remove('d-none');
+                                    if (data.updated_at_full) {
+                                        editedBadge.title = `Düzenlendi: ${data.updated_at_full}`;
+                                    }
+                                }
+                                if (timeSpan && data.updated_at_full) {
+                                    const currentTitle = timeSpan.getAttribute('title') || `Gönderildi: ${timeSpan.textContent}`;
+                                    if (!currentTitle.includes('Düzenlendi:')) {
+                                        timeSpan.setAttribute('title', `${currentTitle} • Düzenlendi: ${data.updated_at_full}`);
+                                    } else {
+                                        const parts = currentTitle.split('•')[0].trim();
+                                        timeSpan.setAttribute('title', `${parts} • Düzenlendi: ${data.updated_at_full}`);
+                                    }
+                                }
+                            }
+                            const editModalEl = document.getElementById('editMessageModal');
+                            const editModal = bootstrap.Modal.getInstance(editModalEl);
+                            if (editModal) editModal.hide();
+                        }
+                    });
+                }
+            });
+        }
+
+        // Sohbeti Temizle
+        const btnClearChatHistory = document.getElementById('btnClearChatHistory');
+        if (btnClearChatHistory) {
+            btnClearChatHistory.addEventListener('click', function () {
+                if (!confirm('Bu sohbetin geçmişini ekranınızdan temizlemek istediğinizden emin misiniz?')) return;
+                fetch("{% url 'clear_chat' %}", {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ chat_type: chatType, chat_id: chatId })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        chatBox.innerHTML = `
+                            <div id="noMessagesPlaceholder" class="text-center text-muted my-5 py-5">
+                                <i class="bi bi-chat-dots display-4 d-block mb-3 opacity-50 text-primary"></i>
+                                <h6 class="fw-bold text-dark">Sohbet geçmişi temizlendi</h6>
+                                <p class="small mb-0">İlk mesajı siz göndererek sohbeti başlatabilirsiniz.</p>
+                            </div>
+                        `;
+                    }
+                });
+            });
+        }
+
+        // Sohbeti Arşivle / Arşivden Çıkar
+        const btnToggleArchiveChat = document.getElementById('btnToggleArchiveChat');
+        if (btnToggleArchiveChat) {
+            btnToggleArchiveChat.addEventListener('click', function () {
+                fetch("{% url 'toggle_archive_chat' %}", {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ chat_type: chatType, chat_id: chatId })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        window.location.reload();
+                    }
+                });
+            });
+        }
 
         // WebSocket başlat
         initWebSocket();

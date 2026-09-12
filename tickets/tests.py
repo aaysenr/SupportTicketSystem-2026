@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.exceptions import ValidationError
 from django.urls import reverse
+import json
 from io import StringIO
 from django.core.management import call_command
 from django.conf import settings
@@ -1200,6 +1201,241 @@ class Stage4AndErrorPagesWorkflowTests(TestCase):
         values = json.loads(res.context['csat_trend_values_json'])
         # Son ayın ortalaması (5 + 4) / 2 = 4.5 olmalı
         self.assertAlmostEqual(values[-1], 4.5, places=1)
+
+    def test_notification_delete_single_and_bulk(self):
+        """Bildirimlerin tek tek ve toplu silinmesini test et."""
+        notif1 = Notification.objects.create(recipient=self.user, message="Silinecek bildirim 1")
+        notif2 = Notification.objects.create(recipient=self.user, message="Silinecek bildirim 2")
+        other_user = User.objects.create_user(username='other_notif_user', password='Password123!')
+        other_notif = Notification.objects.create(recipient=other_user, message="Baskasinin bildirimi")
+
+        self.client.login(username='user_stage4', password='UserPass123!')
+        
+        # 1. Tekil bildirim silme
+        del_url = reverse('delete_notification', kwargs={'pk': notif1.pk})
+        res = self.client.post(del_url)
+        self.assertEqual(res.status_code, 302)
+        self.assertFalse(Notification.objects.filter(pk=notif1.pk).exists())
+        self.assertTrue(Notification.objects.filter(pk=notif2.pk).exists())
+
+        # 2. Başkasının bildirimini silmeye çalışma (404)
+        res_other = self.client.post(reverse('delete_notification', kwargs={'pk': other_notif.pk}))
+        self.assertEqual(res_other.status_code, 404)
+        self.assertTrue(Notification.objects.filter(pk=other_notif.pk).exists())
+
+        # 3. Toplu bildirim silme
+        res_all = self.client.post(reverse('delete_all_notifications'))
+        self.assertEqual(res_all.status_code, 302)
+        self.assertEqual(Notification.objects.filter(recipient=self.user).count(), 0)
+        self.assertTrue(Notification.objects.filter(pk=other_notif.pk).exists())
+
+    def test_chat_message_edit_delete_star(self):
+        """Ekip sohbetinde mesaj düzenleme, silme ve favorilemeyi test et."""
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+        group = ChatGroup.objects.create(name='Test Grubu', created_by=self.staff_user)
+        group.members.add(self.staff_user, self.admin_user)
+
+        msg = ChatMessage.objects.create(sender=self.staff_user, group=group, content='İlk mesaj')
+
+        # 1. Düzenleme
+        edit_url = reverse('edit_chat_message', kwargs={'pk': msg.pk})
+        res_edit = self.client.post(edit_url, json.dumps({'content': 'Güncellenmiş mesaj'}), content_type='application/json')
+        self.assertEqual(res_edit.status_code, 200)
+        msg.refresh_from_db()
+        self.assertEqual(msg.content, 'Güncellenmiş mesaj')
+        self.assertTrue(msg.is_edited)
+
+        # 2. Yıldızlama / Favorileme
+        star_url = reverse('toggle_favorite_chat_message', kwargs={'pk': msg.pk})
+        res_star = self.client.post(star_url)
+        self.assertEqual(res_star.status_code, 200)
+        self.assertTrue(msg.favorited_by.filter(id=self.staff_user.id).exists())
+
+        # 3. Silme
+        del_url = reverse('delete_chat_message', kwargs={'pk': msg.pk})
+        res_del = self.client.post(del_url)
+        self.assertEqual(res_del.status_code, 200)
+        msg.refresh_from_db()
+        self.assertTrue(msg.is_deleted)
+
+    def test_chat_clear_and_archive(self):
+        """Sohbet geçmişini temizleme ve arşivleme tercihlerini test et."""
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+        group = ChatGroup.objects.create(name='Arşiv Grubu', created_by=self.staff_user)
+        group.members.add(self.staff_user)
+
+        # 1. Arşivleme
+        arc_url = reverse('toggle_archive_chat')
+        res_arc = self.client.post(arc_url, json.dumps({'chat_type': 'group', 'chat_id': group.id}), content_type='application/json')
+        self.assertEqual(res_arc.status_code, 200)
+        self.assertTrue(res_arc.json().get('is_archived'))
+
+        # 2. Temizleme
+        clear_url = reverse('clear_chat')
+        res_clear = self.client.post(clear_url, json.dumps({'chat_type': 'group', 'chat_id': group.id}), content_type='application/json')
+        self.assertEqual(res_clear.status_code, 200)
+        self.assertEqual(res_clear.json().get('status'), 'success')
+
+    def test_csat_feedback_table_in_dashboard(self):
+        """Dashboard'da csat_ratings listesinin yer aldığını test et."""
+        rating = TicketRating.objects.create(ticket=self.t1, user=self.user, score=5, feedback="Harika bir destek aldım.")
+        self.client.login(username='admin_stage4', password='AdminPass123!')
+        res = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('csat_ratings', res.context)
+        self.assertIn(rating, res.context['csat_ratings'])
+
+    def test_chat_delete_for_me_and_for_everyone(self):
+        """Yöneticinin başkasının mesajını sadece 'benden sil' yapabildiğini, kendi mesajını ise her iki şekilde silebildiğini test et."""
+        group = ChatGroup.objects.create(name='Silme Grubu', is_general=True)
+        other_staff = User.objects.create_user(username='other_staff', password='Password123!', is_staff=True)
+        msg_other = ChatMessage.objects.create(sender=other_staff, group=group, content='Başkasının mesajı')
+        msg_own = ChatMessage.objects.create(sender=self.staff_user, group=group, content='Kendi mesajım')
+
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+
+        # 1. Başkasının mesajını 'for_everyone' ile silmeyi dene -> Yetki hatası (403)
+        res1 = self.client.post(reverse('delete_chat_message', kwargs={'pk': msg_other.pk}),
+                                json.dumps({'mode': 'for_everyone'}), content_type='application/json')
+        self.assertEqual(res1.status_code, 403)
+        msg_other.refresh_from_db()
+        self.assertFalse(msg_other.is_deleted)
+
+        # 2. Başkasının mesajını 'for_me' ile sil -> Başarılı, sadece staff_user'dan gizlenir
+        res2 = self.client.post(reverse('delete_chat_message', kwargs={'pk': msg_other.pk}),
+                                json.dumps({'mode': 'for_me'}), content_type='application/json')
+        self.assertEqual(res2.status_code, 200)
+        msg_other.refresh_from_db()
+        self.assertFalse(msg_other.is_deleted)
+        self.assertTrue(msg_other.deleted_for_users.filter(id=self.staff_user.id).exists())
+
+        # 3. Kendi mesajını 'for_everyone' ile sil -> Başarılı, is_deleted=True
+        res3 = self.client.post(reverse('delete_chat_message', kwargs={'pk': msg_own.pk}),
+                                json.dumps({'mode': 'for_everyone'}), content_type='application/json')
+        self.assertEqual(res3.status_code, 200)
+        msg_own.refresh_from_db()
+        self.assertTrue(msg_own.is_deleted)
+
+    def test_tag_edit_and_delete_api(self):
+        """Yöneticilerin etiket düzenleme ve silme API'lerini test et."""
+        from tickets.models import TicketTag
+        tag = TicketTag.objects.create(name='TestEtiket', slug='testetiket')
+
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+
+        # 1. Etiket düzenleme
+        res_edit = self.client.post(reverse('edit_tag_api', kwargs={'pk': tag.pk}),
+                                    json.dumps({'name': 'GuncelEtiket'}), content_type='application/json')
+        self.assertEqual(res_edit.status_code, 200)
+        tag.refresh_from_db()
+        self.assertEqual(tag.name, 'GuncelEtiket')
+
+        # 2. Etiket silme
+        res_del = self.client.post(reverse('delete_tag_api', kwargs={'pk': tag.pk}))
+        self.assertEqual(res_del.status_code, 200)
+        self.assertFalse(TicketTag.objects.filter(pk=tag.pk).exists())
+
+    def test_csat_filters_and_sorting(self):
+        """Müşteri değerlendirmeleri tablosunda temsilci, talep no, müşteri no ve tarih sıralaması testleri."""
+        self.client.login(username='admin_stage4', password='AdminPass123!')
+        
+        # Test rating oluştur
+        rating2 = TicketRating.objects.create(ticket=self.t2, user=self.staff_user, score=1, feedback="Kötü")
+
+        # 1. Atanan Temsilciye göre filtreleme
+        res1 = self.client.get(reverse('admin_dashboard') + f'?csat_assigned={self.staff_user.id}')
+        self.assertEqual(res1.status_code, 200)
+
+        # 2. Talep ID'ye göre filtreleme
+        res2 = self.client.get(reverse('admin_dashboard') + f'?csat_ticket_id={self.t2.id}')
+        self.assertEqual(res2.status_code, 200)
+        self.assertIn(rating2, res2.context['csat_ratings'])
+
+        # 3. Müşteri ID'ye göre filtreleme
+        res3 = self.client.get(reverse('admin_dashboard') + f'?csat_user_id={self.staff_user.id}')
+        self.assertEqual(res3.status_code, 200)
+        self.assertIn(rating2, res3.context['csat_ratings'])
+
+        # 4. En eski tarihe göre sıralama
+        res4 = self.client.get(reverse('admin_dashboard') + '?csat_sort=oldest')
+        self.assertEqual(res4.status_code, 200)
+        self.assertEqual(res4.context['csat_sort'], 'oldest')
+
+    def test_custom_password_reset_form(self):
+        """Şifremi unuttum formunun CustomPasswordResetForm üzerinden çalıştığını ve link ürettiğini doğrula."""
+        from io import StringIO
+        import sys
+        captured_output = StringIO()
+        sys.stdout = captured_output
+        try:
+            res = self.client.post(reverse('password_reset'), {'email': 'admin4@example.com'})
+            self.assertEqual(res.status_code, 302)
+            output = captured_output.getvalue()
+            self.assertIn("ŞİFRE SIFIRLAMA E-POSTASI GÖNDERİLDİ", output)
+            self.assertIn("admin4@example.com", output)
+        finally:
+            sys.stdout = sys.__stdout__
+
+    def test_dashboard_superadmin_vs_staff_scoping(self):
+        """Dashboard'da süper admin tüm talepleri, diğer adminlerin sadece kendi kategori/atanan taleplerini gördüğünü doğrula."""
+        import json
+        from tickets.models import Category
+        cat_tech = Category.objects.create(name='Teknik')
+        cat_fin = Category.objects.create(name='Finans')
+
+        # t_tech: Teknik kategorisinde, staff_user atanmış
+        t_tech = Ticket.objects.create(
+            title='Teknik Talep',
+            description='Teknik sorun',
+            created_by=self.user,
+            category=cat_tech,
+            assigned_to=self.staff_user,
+            priority='urgent',
+            status='open'
+        )
+        # t_fin: Finans kategorisinde, kimseye atanmamış (staff_user'a ait değil)
+        t_fin = Ticket.objects.create(
+            title='Finans Talep',
+            description='Finans sorunu',
+            created_by=self.user,
+            category=cat_fin,
+            priority='low',
+            status='open'
+        )
+
+        # Rating ekleyelim
+        TicketRating.objects.create(ticket=t_tech, user=self.user, score=5, feedback="Teknik süper")
+        TicketRating.objects.create(ticket=t_fin, user=self.user, score=1, feedback="Finans kötü")
+
+        # 1. Süper Admin: Tüm talepleri ve genel analizleri görür
+        self.client.login(username='admin_stage4', password='AdminPass123!')
+        res_super = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(res_super.status_code, 200)
+        self.assertTrue(res_super.context['is_superadmin'])
+        self.assertGreaterEqual(res_super.context['total_tickets'], 4)
+        self.assertEqual(res_super.context['csat_count'], 2)
+        cat_labels_super = json.loads(res_super.context['category_labels_json'])
+        self.assertIn('Teknik', cat_labels_super)
+        self.assertIn('Finans', cat_labels_super)
+
+        # 2. Normal Staff Admin (Yalnızca Teknik kategorisi atanmış veya Teknik talebi ona atanmış)
+        self.staff_user.profile.assigned_categories.add(cat_tech)
+        self.client.login(username='staff_stage4', password='StaffPass123!')
+        res_staff = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(res_staff.status_code, 200)
+        self.assertFalse(res_staff.context['is_superadmin'])
+        # Sadece Teknik talebi kapsamda olmalı (Finans hariç)
+        self.assertEqual(res_staff.context['total_tickets'], 1)
+        # CSAT değerlendirmesinde sadece t_tech (5 puan) olmalı, finansın 1 puanı hariç tutulmalı
+        self.assertEqual(res_staff.context['csat_count'], 1)
+        self.assertEqual(res_staff.context['csat_avg'], 5.0)
+        # Kategori dağılımında sadece Teknik olmalı, Finans OLMAMALI
+        cat_labels_staff = json.loads(res_staff.context['category_labels_json'])
+        self.assertIn('Teknik', cat_labels_staff)
+        self.assertNotIn('Finans', cat_labels_staff)
+
+
+
 
 
 
