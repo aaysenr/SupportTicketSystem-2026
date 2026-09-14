@@ -320,4 +320,9 @@ OUTGOING_WEBHOOK_URL = os.getenv("OUTGOING_WEBHOOK_URL", "")
 # AI Copilot (İsteğe bağlı OpenAI / LLM API anahtarı; boşsa yerel akıllı kural motoru çalışır)
 AI_COPILOT_API_KEY = os.getenv("AI_COPILOT_API_KEY", "")
 
+# Gelen e-posta ile bilet cevaplama webhook güvenlik anahtarı
+INBOUND_EMAIL_WEBHOOK_SECRET = os.getenv("INBOUND_EMAIL_WEBHOOK_SECRET", "") or SECRET_KEY[:32]
+
+
+
 

@@ -1369,11 +1369,12 @@ class Stage4AndErrorPagesWorkflowTests(TestCase):
         captured_output = StringIO()
         sys.stdout = captured_output
         try:
-            res = self.client.post(reverse('password_reset'), {'email': 'admin4@example.com'})
-            self.assertEqual(res.status_code, 302)
-            output = captured_output.getvalue()
-            self.assertIn("ŞİFRE SIFIRLAMA E-POSTASI GÖNDERİLDİ", output)
-            self.assertIn("admin4@example.com", output)
+            with self.settings(DEBUG=True):
+                res = self.client.post(reverse('password_reset'), {'email': 'admin4@example.com'})
+                self.assertEqual(res.status_code, 302)
+                output = captured_output.getvalue()
+                self.assertIn("ŞİFRE SIFIRLAMA E-POSTASI GÖNDERİLDİ", output)
+                self.assertIn("admin4@example.com", output)
         finally:
             sys.stdout = sys.__stdout__
 

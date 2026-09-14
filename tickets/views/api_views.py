@@ -104,7 +104,7 @@ def inbound_email_webhook(request):
     """
     import hmac
     from django.conf import settings
-    expected_secret = getattr(settings, 'INBOUND_EMAIL_WEBHOOK_SECRET', settings.SECRET_KEY[:32])
+    expected_secret = getattr(settings, 'INBOUND_EMAIL_WEBHOOK_SECRET', None) or settings.SECRET_KEY[:32]
 
     provided_secret = request.headers.get('X-Webhook-Secret') or request.GET.get('token')
     if not provided_secret or not hmac.compare_digest(str(provided_secret), str(expected_secret)):

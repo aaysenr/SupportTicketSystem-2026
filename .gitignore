@@ -1,12 +1,97 @@
-venv/
-*.pyc
-__pycache__/
-db.sqlite3
-.DS_Store
-.vscode/
-media/
+# ==============================================================================
+# Git Ignore - Destek Talep Sistemi (Support Ticket System)
+# ==============================================================================
+
+# 1. Ortam Değişkenleri ve Gizli Anahtarlar (Secrets & Environment)
 .env
-.env.local
+.env.*
+!.env.example
 *.env
+local_settings.py
+
+# 2. Veritabanı (SQLite & Test DBs)
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
+db.sqlite3
+db.sqlite3-journal
+
+# 3. Kullanıcı Yüklemeleri & Derlenmiş Statik Dosyalar (Media & Static)
+media/
+staticfiles/
+
+# 4. Loglar ve Günlük Dosyaları
 logs/
-staticfiles/
+*.log
+
+# 5. Sanal Ortamlar (Virtual Environments)
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# 6. Python Önbellek ve Derleme Dosyaları (Bytecode & Cache)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 7. Test, Analiz ve Kapsam Dosyaları (Testing & Coverage)
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# 8. IDE ve Editör Ayarları
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# 9. İşletim Sistemi Geçici Dosyaları (OS Generated Files)
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+*Zone.Identifier
+
+# 10. Sertifika ve Özel Anahtarlar (Certificates & Private Keys)
+*.pem
+*.key
+*.crt
+*.cert
+*.pfx
+*.p12
