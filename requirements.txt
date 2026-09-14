@@ -45,7 +45,6 @@ pillow==12.3.0
 # Veritabanı & Ağ / HTTP Akış Araçları
 psycopg2-binary==2.9.13
 dj-database-url==3.1.2
-django-ranged-response==0.2.0
 
 # Serileştirme, Kodlama & Yardımcı Paketler
 attrs==26.1.0

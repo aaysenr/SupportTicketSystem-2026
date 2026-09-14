@@ -6,6 +6,28 @@ Bu sistem; kullanıcıların destek talepleri oluşturabildiği, güvenli dosya 
 
 ---
 
+## 🎯 Staj Teslimi & Hızlı Başlangıç Rehberi
+
+Bu proje staj teslimi amacıyla hazırlanmış olup, staj sorumlusunun sistemi farklı rollerle (Süper Yönetici, Destek Uzmanı, Finans Uzmanı ve Müşteri) hemen test edebilmesi için gerçekçi verilerle donatılmıştır.
+
+### 🔑 Giriş Hesapları ve Yetkileri
+
+| Kullanıcı Adı | Parola | Rol / Departman | Erişim Yetkisi |
+| :--- | :--- | :--- | :--- |
+| **`admin`** | `Admin123!` | **Süper Yönetici** | Tüm sisteme, istatistiklere, ayarlara ve tüm taleplere tam yetki |
+| **`destek_uzmani`** | `Destek123!` | **Teknik Destek Uzmanı** | Yazılım, Donanım ve Ağ departmanı talepleri, iç notlar & Ekip Sohbeti |
+| **`finans_uzmani`** | `Finans123!` | **Finans Destek Uzmanı** | Ödeme & Faturalandırma talepleri, iç notlar & Ekip Sohbeti |
+| **`ahmet_yilmaz`** | `User123!` | **Müşteri / Personel** | Talep açma, durum takip etme, yanıtlama ve 5 yıldızlı CSAT değerlendirmesi |
+| **`ayse_demir`** | `User123!` | **Müşteri / Personel** | Talep açma, durum takip etme, yanıtlama ve SLA aşım senaryosu |
+
+> 💡 **Demo Verilerini Sıfırlama:**
+> Veritabanını dilediğiniz an sıfırlayıp ilk günkü tertemiz haline getirmek için:
+> ```bash
+> python manage.py seed_demo_data
+> ```
+
+---
+
 ## 🌟 Öne Çıkan Özellikler ve Modüller
 
 ### 1. 🛡️ Gelişmiş Güvenlik, Doğrulama & Hesap Yönetimi Mimarisi
@@ -101,119 +123,147 @@ Bu sistem; kullanıcıların destek talepleri oluşturabildiği, güvenli dosya 
 Support Ticket System/
 │
 ├── config/                     # Django Proje Çekirdek Ayarları
-│   ├── asgi.py                 # WebSocket ve Channels yönlendirmeleri
-│   ├── settings.py             # 12-Factor .env destekli sistem ayarları
-│   ├── urls.py                 # Ana URL haritası ve gizli super-admin
-│   └── wsgi.py                 # WSGI dağıtım dosyası
+│   ├── asgi.py                 # WebSocket ve Channels yönlendirmeleri (Daphne)
+│   ├── settings.py             # 12-Factor .env destekli sistem ayarları & Redis/LocMem Cache
+│   ├── urls.py                 # Ana URL haritası ve super-admin rotası
+│   └── wsgi.py                 # WSGI üretim dağıtım dosyası
 │
 ├── tickets/                    # Ana Destek Sistemi Uygulaması
 │   ├── consumers.py            # WebSocket Tüketicileri (Ekip Sohbeti & Canlı Talep)
-│   ├── forms.py                # Güvenlikli Formlar & CustomPasswordResetForm
-│   ├── middleware.py           # Özel 404/403/500 Hata Yakalayıcı ve URL Gizleyici
+│   ├── forms.py                # Güvenlikli Formlar, XSS Temizliği & CustomPasswordResetForm
+│   ├── middleware.py           # Özel 404/403/500 Hata Yakalayıcı ve AJAX Koruyucu
 │   ├── models.py               # Ticket, Comment, Tag, CSAT, SLA, Chat, Profil Modelleri
-│   ├── pdf.py                  # Çapraz Platform Kurumsal PDF Rapor Üreticisi
+│   ├── pdf.py                  # Çapraz Platform Kurumsal Antetli PDF Rapor Üreticisi
 │   ├── copilot.py              # Akıllı Kategori/Öncelik Sezgisel Motoru & Özetleyici
 │   ├── webhooks.py             # Slack / Discord Asenkron Acil Durum Webhook İstemcisi
 │   ├── routing.py              # WebSocket URL rotaları
-│   ├── tests.py                # 72 Kapsamlı Otomasyon & Güvenlik Testi (%100 Başarı)
+│   ├── tests.py                # 107 Kapsamlı Otomasyon & Güvenlik Testi (%100 Başarı)
 │   ├── totp.py                 # RFC 6238 TOTP 2FA ve QR Kod Motoru
 │   ├── urls.py                 # Uygulama içi rotalar ve API uç noktaları
-│   ├── validators.py           # Magic bytes dosya imza ve boyut doğrulayıcıları
+│   ├── validators.py           # Magic bytes dosya imza, boyut ve güvenlik doğrulayıcıları
 │   │
 │   ├── views/                  # Modüler Görünüm Katmanı (Clean Architecture)
 │   │   ├── __init__.py         # Tüm görünümleri dışa aktaran modüler köprü
 │   │   ├── common.py           # Asenkron e-posta kuyruğu ve ortak yardımcılar
-│   │   ├── auth_views.py       # Login (Brute-Force korumalı), 2FA, Profil, Hesap Silme
+│   │   ├── auth_views.py       # Login (Brute-Force & Open Redirect korumalı), 2FA, Profil
 │   │   ├── ticket_views.py     # Ticket CRUD, Yorumlar, Ekler, Bulk Action & Merge (ACID)
-│   │   ├── chat_views.py       # Canlı Takım Sohbeti, DM, Arşiv ve Mesajlaşma API'leri
-│   │   ├── dashboard_views.py  # RBAC Yönetici Gösterge Paneli, Excel/PDF/CSV Raporları
-│   │   ├── notification_views.py # Bildirim Listesi, Okundu/Silme İşlemleri
+│   │   ├── chat_views.py       # N+1 optimizesi yapılmış Ekip Sohbeti, DM, Arşiv ve API'ler
+│   │   ├── dashboard_views.py  # RBAC Yönetici Paneli, Excel/PDF/CSV Raporları
+│   │   ├── notification_views.py # Bildirim Listesi, Okundu/Silme İşlemleri (@require_POST)
 │   │   ├── kb_views.py         # Bilgi Bankası (SSS) Makaleleri ve Canlı Arama
 │   │   ├── api_views.py        # Webhook, CSAT Rating, Hazır Şablonlar, Etiket CRUD
 │   │   └── error_views.py      # Özel 404, 403 ve 500 Hata Görünümleri
 │   │
-│   ├── management/commands/    # Özel CLI komutları (örn: send_test_email)
+│   ├── management/commands/    # CLI Yönetim Komutları
+│   │   ├── seed_demo_data.py   # Staj demo verilerini ve hesaplarını otomatik yükleyici
+│   │   ├── run_scheduler.py    # Yerleşik SLA ve hesap temizliği arka plan zamanlayıcısı
+│   │   ├── check_sla_breaches.py # SLA ihlal denetimi ve webhook tetikleyicisi
+│   │   ├── cleanup_unverified_accounts.py # Pasif hesap temizliği
+│   │   └── send_test_email.py  # SMTP / Console e-posta test aracı
+│   │
 │   └── templates/              # Jinja2 / Django HTML ve E-posta Şablonları
 │       ├── emails/             # Zengin HTML e-posta bildirim şablonları
 │       └── tickets/            # ticket_detail, team_chat, dashboard, ticket_list vb.
 │
+├── static/                     # Statik Varlıklar (Özel Vektörel SVG Favicon vb.)
+├── scripts/                    # Canlı Ortam Otomasyon Betikleri
+│   ├── crontab.txt             # Linux/macOS zamanlanmış görev crontab rehberi
+│   └── setup_scheduled_tasks.ps1 # Windows Görev Zamanlayıcısı PowerShell betiği
 ├── templates/                  # Genel Şablonlar (base.html, 404.html, 403.html, 500.html)
-├── media/                      # Kullanıcı ekleri ve profil fotoğrafları (korumalı)
-├── logs/                       # Otomatik rotasyonlu merkezi hata logları (django_errors.log)
-├── .env.example                # Örnek ortam değişkenleri şablonu
-├── requirements.txt            # Python bağımlılıkları listesi (kategorize edilmiş)
+├── media/                      # Kullanıcı ekleri ve profil fotoğrafları (yetki korumalı)
+├── logs/                       # Otomatik rotasyonlu merkezi log dosyaları
+├── .env.example                # Örnek ortam değişkenleri şablonu (PostgreSQL, Redis, SMTP)
+├── requirements.txt            # Python bağımlılıkları listesi
 └── README.md                   # Güncel proje dokümantasyonu
 ```
 
 ---
 
-## 🚀 Hızlı Kurulum ve Başlatma
+## 🚀 Hızlı Kurulum ve Başlatma (Staj Sorumlusu Kılavuzu)
 
-### 1. Depoyu Klonlayın veya Klasöre Geçin
+Projeyi kendi bilgisayarınızda (Windows, macOS veya Linux) çalıştırmak için aşağıdaki adımları izleyebilirsiniz:
+
+### 1. Proje Dizinine Geçin
 ```bash
-git clone https://github.com/kullanici-adi/support-ticket-system.git
 cd "Support Ticket System"
 ```
 
-### 2. Sanal Ortamı Oluşturun ve Aktifleştirin
-**Windows (PowerShell):**
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
+### 2. Sanal Ortamı (Virtualenv) Oluşturun ve Aktifleştirin
 
-**Linux / macOS:**
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+* **Windows (PowerShell):**
+  ```powershell
+  python -m venv venv
+  .\venv\Scripts\Activate.ps1
+  ```
+  *(veya CMD: `venv\Scripts\activate.bat`)*
 
-### 3. Bağımlılıkları Yükleyin
+* **Linux / macOS:**
+  ```bash
+  python3 -m venv venv
+  source venv/bin/activate
+  ```
+
+### 3. Gerekli Paketleri Yükleyin
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Ortam Değişkenlerini Tanımlayın (`.env`)
-```bash
-copy .env.example .env     # Windows
-cp .env.example .env       # Linux / macOS
-```
-
-### 5. Veritabanı Migrasyonlarını Uygulayın
+### 4. Veritabanı Tablolarını Oluşturun
 ```bash
 python manage.py migrate
 ```
 
-### 6. Süper Yönetici (Admin) Hesabı Oluşturun
+### 5. Demo Verilerini ve Test Hesaplarını Yükleyin (Önerilen)
+Sistemi sıfırdan hesap açmakla uğraşmadan hemen test edebilmeniz için tek komutla tüm demo ortamını hazırlayabilirsiniz:
 ```bash
-python manage.py createsuperuser
+python manage.py seed_demo_data
 ```
+> Bu komut; Süper Yönetici, Destek Uzmanı, Finans Uzmanı ve Müşteri hesaplarını oluşturur; gerçekçi destek taleplerini, bilgi bankası makalelerini ve hazır yanıt şablonlarını otomatik yükler.
 
-### 7. Sunucuyu Başlatın
-WebSocket desteğiyle çalıştırmak için Daphne veya `runserver` kullanın:
+### 6. Geliştirme Sunucusunu Başlatın
 ```bash
 python manage.py runserver
 ```
-Tarayıcınızdan `http://127.0.0.1:8000/` adresine giderek sistemi kullanmaya başlayabilirsiniz!
+Tarayıcınızdan **`http://127.0.0.1:8000/`** adresine giderek uygulamayı test etmeye başlayabilirsiniz!
+
+---
+
+## 🧭 Staj Sorumlusu İçin 5 Dakikalık Test Turu
+
+Projeyi test ederken şu akışı izleyerek tüm modülleri deneyimleyebilirsiniz:
+
+1. **Süper Yönetici Girişi:** `admin` / `Admin123!` ile giriş yapın.
+   - Üst menüden **"İstatistikler"** sekmesine tıklayarak kategori/öncelik dağılım grafiklerini, SLA ihlallerini ve CSAT memnuniyet analizlerini inceleyin.
+   - **"Excel İndir"** ve **"PDF Raporu Al"** butonlarını test edin.
+2. **Teknik Destek Uzmanı Girişi:** `destek_uzmani` / `Destek123!` ile giriş yapın.
+   - Üst menüden **"Ekip Sohbeti"** sekmesine girerek gerçek zamanlı WebSocket mesajlaşmasını, WhatsApp tarzı mesaj düzenleme/silme ve yıldızlama özelliklerini test edin.
+   - Bilet detayında **"⚡ Hazır Yanıt Şablonu"** seçerek mesaja otomatik doldurma yeteneğini inceleyin.
+3. **Müşteri / Personel Girişi:** `ahmet_yilmaz` / `User123!` ile giriş yapın.
+   - Çözülen e-fatura talebini inceleyin ve sayfa altındaki **5 Yıldızlı Memnuniyet (CSAT)** anketini oylayın.
+   - **"Yeni Talep Oluştur"** butonuna basarak başlığa göre canlı Bilgi Bankası (SSS) makalesi öneren yapay zeka sezgisel motorunu test edin.
+4. **Arka Plan Görev Otomasyonunu Test Edin:**
+   ```bash
+   python manage.py run_scheduler --run-once
+   ```
 
 ---
 
 ## 🧪 Test Süiti ve Doğrulama
 
-Sistem; yetkilendirme, RBAC dashboard ayrımı, güvenlik açıkları, 2FA TOTP akışları, Magic Bytes filtreleri, SLA tatil hesaplamaları, XSS engellemeleri, Excel/PDF dışa aktarma, bilet birleştirme, bildirim silme, etiket yönetimi, konsol şifre sıfırlama çıktısı, login brute-force koruması, hesap silme ve WebSocket API'lerini denetleyen **72 kapsamlı birim ve entegrasyon testine** sahiptir:
+Sistem; yetkilendirme, RBAC dashboard ayrımı, güvenlik açıkları, 2FA TOTP akışları, Magic Bytes filtreleri, SLA tatil hesaplamaları, XSS engellemeleri, Excel/PDF dışa aktarma, bilet birleştirme, bildirim silme, etiket yönetimi, login brute-force koruması, hesap silme ve WebSocket API'lerini denetleyen **107 kapsamlı otomatik teste** sahiptir:
 
 ```bash
-python manage.py test tickets.tests
+python manage.py test
 ```
 
 Konsol çıktısı:
 ```text
 Creating test database for alias 'default'...
-........................................................................
+...........................................................................................................
 ----------------------------------------------------------------------
-Ran 72 tests in 186.346s
+Ran 107 tests in 221.449s
 
-OK (72/72 - %100 Başarı)
+OK (107/107 - %100 Başarı)
 Destroying test database for alias 'default'...
 ```
 
@@ -221,4 +271,4 @@ Destroying test database for alias 'default'...
 
 ## 📄 Lisans
 
-Bu proje MIT Lisansı altında lisanslanmıştır. Detaylar için `LICENSE` dosyasına göz atabilirsiniz.
+Bu proje staj çalışması kapsamında MIT Lisansı altında geliştirilmiştir.

@@ -1,48 +1,23 @@
-import os
-import mimetypes
-import json
-import re
-import threading
-import logging
-import csv
-import openpyxl
-from datetime import datetime, date
-
-import nh3
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse, FileResponse, HttpResponseForbidden, Http404, HttpResponse
 from django.contrib.auth.models import User
 from django.contrib.auth import login, logout, authenticate, update_session_auth_hash
 from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
-from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from django.db import transaction
-from django.db.models import Q, Count, Avg, F
-from django.core.paginator import Paginator
+from django.db.models import Q
 from django.core.mail import send_mail
 from django.core.cache import cache
 from django.utils import timezone
-from django.utils.text import slugify
+from django.utils.http import url_has_allowed_host_and_scheme
 
-from ..models import (
-    Ticket, TicketComment, Category, EmailVerification, TicketActivityLog,
-    Notification, ChatGroup, ChatMessage, UserChatPreference, UserProfile, KnowledgeBaseArticle,
-    TicketRating, CannedResponse, TicketTag
-)
-from ..forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm
+from ..models import Ticket, EmailVerification, TicketActivityLog, UserProfile
+from ..forms import UserRegisterForm, UserProfileForm
 from ..totp import (
-    generate_totp_secret, get_totp_token, verify_totp_token,
+    generate_totp_secret, verify_totp_token,
     get_totp_uri, generate_qr_code_data_uri
 )
-from ..pdf import generate_ticket_pdf
-from ..webhooks import send_outgoing_webhook
-from ..copilot import suggest_category_and_priority, generate_ticket_summary
-from ..consumers import ALLOWED_TAGS, ALLOWED_ATTRIBUTES
-from .common import send_notification_email, _async_email_worker
-
-logger = logging.getLogger(__name__)
 
 
 def verify_email(request):
@@ -116,6 +91,31 @@ def register_user(request):
 
     if request.method == 'POST':
         form = UserRegisterForm(request.POST)
+
+        # Form doğrulamasını tetikle (clean_email ve captcha kontrolü çalışsın)
+        _ = form.errors
+
+        # Onay bekleyen (is_active=False) mevcut bir hesap varsa ve güvenlik kodu doğruysa:
+        if getattr(form, 'inactive_user', None) and 'captcha' not in form.errors:
+            user = form.inactive_user
+            verification, _ = EmailVerification.objects.get_or_create(user=user)
+            verification.generate_code()
+
+            try:
+                send_mail(
+                    subject="E-Posta Dogrulama Kodu",
+                    message=f"Merhaba {user.username},\n\nHesabınız zaten mevcut ancak henüz onaylanmamış. Yeni doğrulama kodunuz: {verification.code}\n\nBu kod 10 dakika süreyle geçerlidir.",
+                    from_email=None,
+                    recipient_list=[user.email],
+                    fail_silently=True
+                )
+            except Exception:
+                pass
+
+            request.session['unverified_user_id'] = user.id
+            messages.info(request, "Hesabınız zaten mevcut ancak onaylanmamış. Yeni onay kodu gönderildi.")
+            return redirect('verify_email')
+
         if form.is_valid():
             # 1. Kullanıcıyı henüz pasif (is_active=False) olarak kaydediyoruz
             user = form.save(commit=False)
@@ -186,7 +186,16 @@ def login_user(request):
         })
 
     if request.method == 'POST':
-        form = AuthenticationForm(request, data=request.POST)
+        post_data = request.POST.copy()
+        raw_username = post_data.get('username', '').strip()
+
+        # Kullanıcı kullanıcı adı yerine e-posta ile giriş yapmak istemişse, username'i bul
+        if '@' in raw_username:
+            user_by_email = User.objects.filter(email__iexact=raw_username).first()
+            if user_by_email:
+                post_data['username'] = user_by_email.username
+
+        form = AuthenticationForm(request, data=post_data)
         if form.is_valid():
             username = form.cleaned_data.get('username')
             password = form.cleaned_data.get('password')
@@ -202,9 +211,10 @@ def login_user(request):
                     return redirect('verify_2fa')
 
                 login(request, user)
-                messages.success(request, f"Tekrar hoş geldiniz, {username}!")
+                display_name = user.get_full_name() or user.username
+                messages.success(request, f"Tekrar hoş geldiniz, {display_name}!")
                 next_url = request.POST.get('next') or request.GET.get('next')
-                if next_url and next_url.startswith('/'):
+                if next_url and url_has_allowed_host_and_scheme(url=next_url, allowed_hosts={request.get_host()}):
                     return redirect(next_url)
                 return redirect('ticket_list')
             else:
@@ -221,10 +231,13 @@ def login_user(request):
                     remaining = 5 - current_attempts
                     messages.error(request, f"Kullanıcı adı veya parola hatalı. Kalan deneme hakkı: {remaining}")
         else:
-            username_input = request.POST.get('username')
-            password_input = request.POST.get('password')
+            username_input = request.POST.get('username', '').strip()
+            password_input = request.POST.get('password', '')
             if username_input and password_input:
-                unverified_user = User.objects.filter(username=username_input, is_active=False).first()
+                unverified_user = User.objects.filter(
+                    Q(username=username_input) | Q(email__iexact=username_input),
+                    is_active=False
+                ).first()
                 if unverified_user and unverified_user.check_password(password_input):
                     request.session['unverified_user_id'] = unverified_user.id
                     messages.info(request, "Hesabınız henüz doğrulanmamış. Lütfen doğrulama kodunu giriniz.")
@@ -295,6 +308,21 @@ def change_password_view(request):
             user = form.save()
             # Şifre değiştiğinde kullanıcının oturumunun kapanmasını engeller:
             update_session_auth_hash(request, user)
+            if user.email:
+                try:
+                    from .common import send_notification_email
+                    send_notification_email(
+                        subject="[Güvenlik Uyarısı] Hesap Şifreniz Değiştirildi",
+                        message=(
+                            f"Merhaba {user.username},\n\n"
+                            f"Destek Talep Sistemi hesabınızın şifresi az önce başarıyla değiştirildi.\n\n"
+                            f"Eğer bu işlemi siz gerçekleştirmediyseniz, lütfen vakit kaybetmeden sistem yöneticiniz ile iletişime geçiniz.\n\n"
+                            f"İşlem Zamanı: {timezone.now().strftime('%d.%m.%Y %H:%M')}"
+                        ),
+                        recipient_list=[user.email]
+                    )
+                except Exception:
+                    pass
             messages.success(request, "Şifreniz başarıyla değiştirildi!")
             return redirect('profile')
         else:
@@ -370,6 +398,21 @@ def disable_2fa_view(request):
         profile.is_2fa_enabled = False
         profile.totp_secret = ""
         profile.save(update_fields=['is_2fa_enabled', 'totp_secret'])
+        if request.user.email:
+            try:
+                from .common import send_notification_email
+                send_notification_email(
+                    subject="[Güvenlik Uyarısı] İki Aşamalı Doğrulama (2FA) Devre Dışı Bırakıldı",
+                    message=(
+                        f"Merhaba {request.user.username},\n\n"
+                        f"Destek Talep Sistemi hesabınızda İki Aşamalı Doğrulama (2FA) koruması devre dışı bırakılmıştır.\n\n"
+                        f"Eğer bu işlemi siz gerçekleştirmediyseniz, hesabınız tehlikede olabilir. Lütfen derhal şifrenizi yenileyin ve sistem yöneticiniz ile iletişime geçiniz.\n\n"
+                        f"İşlem Zamanı: {timezone.now().strftime('%d.%m.%Y %H:%M')}"
+                    ),
+                    recipient_list=[request.user.email]
+                )
+            except Exception:
+                pass
         messages.success(request, "İki Aşamalı Doğrulama (2FA) başarıyla devre dışı bırakıldı.")
 
     return redirect('profile')
@@ -397,16 +440,30 @@ def verify_2fa_view(request):
     if request.method == 'POST':
         token = request.POST.get('token', '').strip()
         if verify_totp_token(profile.totp_secret, token):
+            if '2fa_failed_attempts' in request.session:
+                del request.session['2fa_failed_attempts']
             login(request, user)
             next_url = request.session.pop('2fa_next', None)
             if '2fa_user_id' in request.session:
                 del request.session['2fa_user_id']
             messages.success(request, f"İki aşamalı doğrulama başarılı! Tekrar hoş geldiniz, {user.username}.")
-            if next_url and next_url.startswith('/'):
+            if next_url and url_has_allowed_host_and_scheme(url=next_url, allowed_hosts={request.get_host()}):
                 return redirect(next_url)
             return redirect('ticket_list')
         else:
-            messages.error(request, "Doğrulama kodu hatalı veya süresi geçmiş. Lütfen Authenticator uygulamanızı kontrol edin.")
+            failed_attempts = request.session.get('2fa_failed_attempts', 0) + 1
+            request.session['2fa_failed_attempts'] = failed_attempts
+            if failed_attempts >= 5:
+                if '2fa_user_id' in request.session:
+                    del request.session['2fa_user_id']
+                if '2fa_next' in request.session:
+                    del request.session['2fa_next']
+                if '2fa_failed_attempts' in request.session:
+                    del request.session['2fa_failed_attempts']
+                messages.error(request, "5 ardışık hatalı 2FA kodu girildi. Güvenliğiniz için doğrulama oturumu sonlandırıldı. Lütfen baştan giriş yapınız.")
+                return redirect('login')
+            remaining = 5 - failed_attempts
+            messages.error(request, f"Doğrulama kodu hatalı veya süresi geçmiş. Kalan deneme hakkı: {remaining}")
 
     # Kullanıcı e-postasını maskeleme (örn: ah***@domain.com)
     email = user.email

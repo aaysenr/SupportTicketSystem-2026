@@ -1,48 +1,22 @@
-import os
-import mimetypes
 import json
 import re
-import threading
-import logging
-import csv
-import openpyxl
-from datetime import datetime, date
-
 import nh3
-from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse, FileResponse, HttpResponseForbidden, Http404, HttpResponse
+
+from django.shortcuts import get_object_or_404
+from django.http import JsonResponse
 from django.contrib.auth.models import User
-from django.contrib.auth import login, logout, authenticate, update_session_auth_hash
-from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
-from django.contrib import messages
-from django.db import transaction
-from django.db.models import Q, Count, Avg, F
-from django.core.paginator import Paginator
-from django.core.mail import send_mail
-from django.core.cache import cache
+from django.db.models import Q, Count
 from django.utils import timezone
 from django.utils.text import slugify
 
 from ..models import (
-    Ticket, TicketComment, Category, EmailVerification, TicketActivityLog,
-    Notification, ChatGroup, ChatMessage, UserChatPreference, UserProfile, KnowledgeBaseArticle,
+    Ticket, TicketComment, Category, Notification,
     TicketRating, CannedResponse, TicketTag
 )
-from ..forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm
-from ..totp import (
-    generate_totp_secret, get_totp_token, verify_totp_token,
-    get_totp_uri, generate_qr_code_data_uri
-)
-from ..pdf import generate_ticket_pdf
-from ..webhooks import send_outgoing_webhook
 from ..copilot import suggest_category_and_priority, generate_ticket_summary
-from ..consumers import ALLOWED_TAGS, ALLOWED_ATTRIBUTES
-from .common import send_notification_email, _async_email_worker
-
-logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -86,9 +60,6 @@ def submit_ticket_rating_api(request, ticket_id):
         'feedback': rating.feedback,
         'message': 'Geri bildiriminiz ve puanınız başarıyla kaydedildi. Teşekkür ederiz! ⭐'
     })
-
-
-# --- GÜVENLİ DOSYA İNDİRME VE AKIŞ GÖRÜNÜMLERİ (SECURE ATTACHMENTS) ---
 
 
 
@@ -175,8 +146,7 @@ def inbound_email_webhook(request):
         author = User.objects.filter(email__iexact=sender_email).first()
 
         if not author:
-            # Sistemde kayıtlı değilse talep sahibini varsay
-            author = ticket.created_by
+            return JsonResponse({'error': f"'{sender_email}' adresine ait sistemde kayıtlı bir kullanıcı bulunamadı."}, status=400)
 
         # 3. Alıntı / Geçmiş Metinleri Temizle
         cleaned_lines = []
@@ -196,11 +166,26 @@ def inbound_email_webhook(request):
         # HTML / XSS Temizliği
         sanitized_content = nh3.clean(clean_text)
 
+        # Birleştirilmiş talep ise e-posta yanıtını otomatik olarak ana aktif talebe aktar (ITIL Standardı)
+        if ticket.merged_into:
+            orig_ticket_num = ticket.ticket_number
+            ticket = ticket.merged_into
+            sanitized_content = f"<i>[E-posta #{orig_ticket_num} birleştirilmiş talebinden aktarıldı]</i>\n\n" + sanitized_content
+
         # 4. Yorumu Kaydet
+        uploaded_file = request.FILES.get('attachment') or request.FILES.get('file')
+        if uploaded_file:
+            try:
+                from ..validators import validate_file_security
+                validate_file_security(uploaded_file)
+            except Exception:
+                uploaded_file = None
+
         comment = TicketComment.objects.create(
             ticket=ticket,
             author=author,
             content=sanitized_content,
+            attachment=uploaded_file,
             is_internal=False
         )
 
@@ -210,6 +195,8 @@ def inbound_email_webhook(request):
             ticket.save(update_fields=['first_response_at'])
 
         # 5. İlgili Taraflara Bildirim Gönder
+        from .common import send_notification_email
+
         if author != ticket.created_by:
             Notification.objects.create(
                 recipient=ticket.created_by,
@@ -217,6 +204,21 @@ def inbound_email_webhook(request):
                 ticket=ticket,
                 message=f"#{ticket.ticket_number} talebinize e-posta yoluyla yeni yanıt eklendi."
             )
+            if ticket.created_by.email:
+                try:
+                    send_notification_email(
+                        subject=f"[Destek Talebi] #{ticket.ticket_number} Talebinize Yeni Yanıt Geldi",
+                        message=(
+                            f"Merhaba {ticket.created_by.username},\n\n"
+                            f"#{ticket.ticket_number} numaralı '{ticket.title}' talebinize "
+                            f"{author.username} tarafından e-posta ile yeni bir yanıt yazıldı:\n\n"
+                            f"\"{comment.content}\"\n\n"
+                            f"Detayları görüntülemek için sisteme giriş yapabilirsiniz."
+                        ),
+                        recipient_list=[ticket.created_by.email]
+                    )
+                except Exception:
+                    pass
 
         if ticket.assigned_to and author != ticket.assigned_to:
             Notification.objects.create(
@@ -225,6 +227,21 @@ def inbound_email_webhook(request):
                 ticket=ticket,
                 message=f"Sorumlu olduğunuz #{ticket.ticket_number} talebine e-posta üzerinden yanıt geldi."
             )
+            if ticket.assigned_to.email:
+                try:
+                    send_notification_email(
+                        subject=f"[Destek Talebi] Sorumlu Olduğunuz #{ticket.ticket_number} Talebine Yeni Yanıt Geldi",
+                        message=(
+                            f"Merhaba {ticket.assigned_to.username},\n\n"
+                            f"Sorumlu olduğunuz #{ticket.ticket_number} numaralı '{ticket.title}' talebine "
+                            f"{author.username} tarafından yeni bir yanıt yazıldı:\n\n"
+                            f"\"{comment.content}\"\n\n"
+                            f"Detayları incelemek için sisteme giriş yapabilirsiniz."
+                        ),
+                        recipient_list=[ticket.assigned_to.email]
+                    )
+                except Exception:
+                    pass
 
         # 6. Canlı WebSocket Grubuna Broadcast Gönder
         try:
@@ -319,6 +336,7 @@ def create_tag_api(request):
     """
     
     import json
+    import re
     from django.utils.text import slugify
 
     try:
@@ -326,11 +344,12 @@ def create_tag_api(request):
     except Exception:
         data = request.POST
 
-    name = data.get('name', '').strip()[:20]
+    raw_name = data.get('name', '').strip()
+    name = re.sub(r'[^\w\s-]', '', raw_name).strip()[:20]
     color = '#3B82F6'  # Etiket rengi daima standart mavi
 
     if not name:
-        return JsonResponse({'status': 'error', 'message': 'Etiket adı boş bırakılamaz.'}, status=400)
+        return JsonResponse({'status': 'error', 'message': 'Geçerli bir etiket adı giriniz.'}, status=400)
 
     # Aynı isimde varsa mevcut olanı döndür
     existing = TicketTag.objects.filter(name__iexact=name).first()
@@ -370,13 +389,14 @@ def create_tag_api(request):
 def list_tags_api(request):
     """
     Tüm etiketleri JSON olarak listeler (Yöneticiler için düzenleme modalı).
+    Tekil SQL sorgusuyla talep sayılarını hesaplar (N+1 engellendi).
     """
-    tags = TicketTag.objects.all().order_by('name')
+    tags = TicketTag.objects.annotate(ticket_count=Count('tickets')).order_by('name')
     data = [{
         'id': t.id,
         'name': t.name,
         'slug': t.slug,
-        'ticket_count': t.tickets.count()
+        'ticket_count': t.ticket_count
     } for t in tags]
     return JsonResponse({'status': 'success', 'tags': data})
 
@@ -399,9 +419,11 @@ def edit_tag_api(request, pk):
     except Exception:
         data = request.POST
 
-    new_name = data.get('name', '').strip()[:20]
+    import re
+    raw_name = data.get('name', '').strip()
+    new_name = re.sub(r'[^\w\s-]', '', raw_name).strip()[:20]
     if not new_name:
-        return JsonResponse({'status': 'error', 'message': 'Etiket adı boş bırakılamaz.'}, status=400)
+        return JsonResponse({'status': 'error', 'message': 'Geçerli bir etiket adı giriniz.'}, status=400)
 
     # Başka bir etiket bu ada sahip mi?
     conflict = TicketTag.objects.filter(name__iexact=new_name).exclude(pk=tag.pk).first()
@@ -445,8 +467,5 @@ def delete_tag_api(request, pk):
     tag.delete()
 
     return JsonResponse({'status': 'success', 'deleted_id': tag_id})
-
-
-# --- ÖZEL HATA SAYFALARI (404, 403, 500) GÖRÜNÜMLERİ ---
 
 

@@ -53,7 +53,10 @@ def send_outgoing_webhook(ticket, event_type="urgent_ticket_created"):
         status_text = f"Öncelik: {ticket.get_priority_display()} | Durum: {ticket.get_status_display()}"
 
     category_name = ticket.category.name if ticket.category else "Genel"
-    creator_name = ticket.created_by.get_full_name() or ticket.created_by.username
+    try:
+        creator_name = (ticket.created_by.get_full_name() or ticket.created_by.username) if ticket.created_by else "Bilinmeyen Kullanıcı"
+    except Exception:
+        creator_name = "Bilinmeyen Kullanıcı"
     assigned_name = ticket.assigned_to.username if ticket.assigned_to else "Atanmadı"
 
     # Discord Uyumlu Embed Formatı

@@ -109,6 +109,25 @@ else:
     }
 
 
+# Caches Configuration (12-Factor App: Canlıda Redis, Geliştirmede Yerel Bellek)
+# Canlı ortamda çoklu worker'lar arasında hız limitlerinin ve oturum kilitlemelerinin senkronize çalışmasını sağlar.
+if redis_url:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": redis_url,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "unique-support-tickets",
+        }
+    }
+
+
+
 # Database (12-Factor App: PostgreSQL / SQLite Çift Uyumluluk)
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 # Canlı ortamda DATABASE_URL veya POSTGRES_DB ortam değişkeni tanımlıysa PostgreSQL kullanılır.
@@ -164,6 +183,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 
 # Email Konfigürasyonu (12-Factor: Canlıda SMTP, Geliştirmede Console)
@@ -216,8 +236,12 @@ MEDIA_URL ise bu dosyalara tarayıcıdan hangi web adresiyle erişileceğini bel
 
 
 # ==============================================================================
-# Üretim (Production) Güvenlik Başlıkları
+# Üretim (Production) Güvenlik Başlıkları ve CSRF Ayarları
 # ==============================================================================
+_csrf_trusted = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+if _csrf_trusted:
+    CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in _csrf_trusted.split(",") if origin.strip()]
+
 if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
@@ -227,6 +251,8 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000  # 1 Yıl
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+    if os.environ.get("SECURE_SSL_REDIRECT", "False").lower() in ("true", "1", "yes"):
+        SECURE_SSL_REDIRECT = True
 
 # ==============================================================================
 # Oturum Yönetimi ve Güvenliği (Session Management & Expiry)

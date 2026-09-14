@@ -1,5 +1,9 @@
 from django.contrib import admin
-from .models import Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle, TicketRating, CannedResponse, TicketTag
+from .models import (
+    Category, Ticket, TicketComment, UserProfile, KnowledgeBaseArticle,
+    TicketRating, CannedResponse, TicketTag, TicketActivityLog,
+    Notification, ChatGroup, ChatMessage, UserChatPreference, EmailVerification
+)
 
 @admin.register(TicketTag)
 class TicketTagAdmin(admin.ModelAdmin):
@@ -14,17 +18,7 @@ class TicketTagAdmin(admin.ModelAdmin):
 class CategoryAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'description')
     search_fields = ('name',)
-    #Admin panelinde kategoriler listelendiğinde ekranda tablo sütunu olarak nelerin görüneceğini belirler (ID, Kategori Adı ve Açıklama).
 
-    
-    search_fields = ('name',) # Kategori ismine göre arama kutusu
-    #Arama kutusu ekleyerek admin panelinde kategori adlarına göre hızlı arama yapma imkanı sunar.
-    #Admin panelinin üst tarafına bir Arama Kutusu ekler. 
-    # Yönetici bir şey arattığında Django aramayı kategorinin name alanında yapar. 
-    # (Virgüle dikkat: Tek elemanlı bir demet/tuple olduğu için sonuna virgül koyulur).
-    #Admin panelinde arama kutusunun yanındaki filtreleme butonlarının hangi alanlara göre açılacağını belirler.
-    #Admin panelinde listelenen verilerin durum, öncelik, kategori ve oluşturulma tarihine göre filtreleme yapma imkanı sunar.
-    #Admin panelinde listelenen verilerin durum ve önceliğine göre doğrudan düzenleme yapma imkanı sunar.
 
 # 2. Destek Talebi Modeli Yönetimi
 
@@ -115,3 +109,50 @@ class CannedResponseAdmin(admin.ModelAdmin):
     list_filter = ('category', 'created_at')
     search_fields = ('title', 'content')
 
+
+@admin.register(TicketActivityLog)
+class TicketActivityLogAdmin(admin.ModelAdmin):
+    list_display = ('id', 'ticket', 'actor', 'action', 'created_at')
+    list_filter = ('created_at',)
+    search_fields = ('ticket__title', 'action', 'actor__username')
+    readonly_fields = ('ticket', 'actor', 'action', 'created_at')
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ('id', 'recipient', 'actor', 'ticket', 'message', 'is_read', 'created_at')
+    list_filter = ('is_read', 'created_at')
+    search_fields = ('recipient__username', 'actor__username', 'message')
+
+
+@admin.register(ChatGroup)
+class ChatGroupAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'is_general', 'created_by', 'created_at')
+    list_filter = ('is_general', 'created_at')
+    search_fields = ('name', 'created_by__username')
+    filter_horizontal = ('members',)
+
+
+@admin.register(ChatMessage)
+class ChatMessageAdmin(admin.ModelAdmin):
+    list_display = ('id', 'sender', 'group', 'recipient', 'short_content', 'is_read', 'is_edited', 'is_deleted', 'created_at')
+    list_filter = ('is_read', 'is_edited', 'is_deleted', 'created_at')
+    search_fields = ('sender__username', 'recipient__username', 'content')
+
+    def short_content(self, obj):
+        return (obj.content[:50] + "...") if len(obj.content) > 50 else obj.content
+    short_content.short_description = "İçerik"
+
+
+@admin.register(UserChatPreference)
+class UserChatPreferenceAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'group', 'dm_user', 'is_archived', 'cleared_at')
+    list_filter = ('is_archived',)
+    search_fields = ('user__username', 'dm_user__username')
+
+
+@admin.register(EmailVerification)
+class EmailVerificationAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'code', 'failed_attempts', 'created_at')
+    list_filter = ('created_at',)
+    search_fields = ('user__username', 'user__email', 'code')

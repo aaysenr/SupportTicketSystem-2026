@@ -1,0 +1,11 @@
+# ==============================================================================
+# Destek Talep Sistemi - Linux / macOS Crontab Zamanlanmış Görevleri
+# Kurulum: crontab -e komutu ile aşağıdaki satırları ekleyiniz.
+# (Not: /var/www/support_system ve venv yollarını sunucunuza göre düzenleyiniz)
+# ==============================================================================
+
+# 1. Her 15 dakikada bir SLA Süre Aşımı Denetimi (Webhook & E-posta tetikler)
+*/15 * * * * cd /var/www/support_system && /var/www/support_system/venv/bin/python manage.py check_sla_breaches >> logs/cron_sla.log 2>&1
+
+# 2. Her Pazar gecesi saat 03:00'te 7 günden eski pasif ve onaylanmamış hesap temizliği
+0 3 * * 0 cd /var/www/support_system && /var/www/support_system/venv/bin/python manage.py cleanup_unverified_accounts >> logs/cron_cleanup.log 2>&1

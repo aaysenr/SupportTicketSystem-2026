@@ -268,10 +268,14 @@ def generate_ticket_pdf(ticket):
     story.append(header_table)
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#2563eb"), spaceBefore=8, spaceAfter=14))
 
-    # 2. TALEP METADATA TABLOSU
     cat_name = ticket.category.name if ticket.category else "Kategorisiz"
-    creator = ticket.created_by.get_full_name() or ticket.created_by.username
-    assignee = ticket.assigned_to.get_full_name() or ticket.assigned_to.username if ticket.assigned_to else "Atanmadı"
+    try:
+        creator = (ticket.created_by.get_full_name() or ticket.created_by.username) if ticket.created_by else "Bilinmeyen Kullanıcı"
+        creator_email = ticket.created_by.email if (ticket.created_by and ticket.created_by.email) else "-"
+    except Exception:
+        creator = "Bilinmeyen Kullanıcı"
+        creator_email = "-"
+    assignee = (ticket.assigned_to.get_full_name() or ticket.assigned_to.username) if ticket.assigned_to else "Atanmadı"
     created_str = ticket.created_at.strftime('%d.%m.%Y %H:%M') if ticket.created_at else "-"
     sla_status = "SLA Aşıldı!" if ticket.is_sla_breached else ("İlk Yanıt Verildi" if ticket.first_response_at else "Zamanında")
 
@@ -285,7 +289,7 @@ def generate_ticket_pdf(ticket):
             Paragraph("Durum:", meta_label_style), create_safe_paragraph(ticket.get_status_display(), meta_val_style),
         ],
         [
-            Paragraph("Oluşturan:", meta_label_style), create_safe_paragraph(f"{creator} ({ticket.created_by.email or '-'})", meta_val_style),
+            Paragraph("Oluşturan:", meta_label_style), create_safe_paragraph(f"{creator} ({creator_email})", meta_val_style),
             Paragraph("Atanan Personel:", meta_label_style), create_safe_paragraph(assignee, meta_val_style),
         ],
         [
@@ -325,7 +329,10 @@ def generate_ticket_pdf(ticket):
     solution_comment = ticket.comments.filter(is_solution=True).first()
     if solution_comment:
         story.append(Paragraph("✅ Onaylanmış Çözüm (En İyi Yanıt)", heading_style))
-        sol_author = solution_comment.author.get_full_name() or solution_comment.author.username
+        if solution_comment.author:
+            sol_author = solution_comment.author.get_full_name() or solution_comment.author.username
+        else:
+            sol_author = "Silinmiş Kullanıcı"
         sol_date = solution_comment.created_at.strftime('%d.%m.%Y %H:%M')
         sol_header = f"<b>{html.escape(sol_author)}</b> ({sol_date}):"
         sol_body_p = create_safe_paragraph(solution_comment.content, solution_style)
@@ -350,8 +357,12 @@ def generate_ticket_pdf(ticket):
     if comments:
         story.append(Paragraph(f"İletişim Geçmişi ve Yanıtlar ({len(comments)} Yanıt)", heading_style))
         for c in comments:
-            author_name = c.author.get_full_name() or c.author.username
-            role_badge = " [Yetkili]" if c.author.is_staff else " [Kullanıcı]"
+            if c.author:
+                author_name = c.author.get_full_name() or c.author.username
+                role_badge = " [Yetkili]" if c.author.is_staff else " [Kullanıcı]"
+            else:
+                author_name = "Silinmiş Kullanıcı"
+                role_badge = ""
             c_date = c.created_at.strftime('%d.%m.%Y %H:%M')
             sol_badge = " <b>[ONAYLI ÇÖZÜM]</b>" if c.is_solution else ""
             

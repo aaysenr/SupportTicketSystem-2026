@@ -170,6 +170,20 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
             validate_file_security(attachment)
         return attachment
 
+    def clean_content(self):
+        content = self.cleaned_data.get('content', '')
+        if content:
+            content = nh3.clean(
+                content,
+                tags={'p', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                      'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'br', 'span', 'a'},
+                attributes={
+                    'a': {'href', 'title', 'target'},
+                    '*': {'class'}
+                }
+            )
+        return content
+
     class Meta:
         model = TicketComment # Formun bağlanacağı veritabanı tablosunu seçer.
         fields = ['content','is_internal','attachment'] # Formda gösterilecek alanlar.
@@ -209,7 +223,37 @@ class CommentForm(forms.ModelForm): # Django'nun ModelForm sınıfından miras a
             'attachment': 'Ek Dosya / Görsel',
         }
 
-        #labels: Kutunun hemen üstünde HTML <label> olarak görünecek başlığı Türkçeleştirir.
+
+class CommentEditForm(forms.ModelForm):
+    """
+    Var olan bir yorumu güvenli şekilde düzenlemek için model formu.
+    """
+    class Meta:
+        model = TicketComment
+        fields = ['content']
+        widgets = {
+            'content': forms.Textarea(attrs={
+                'class': 'form-control',
+                'rows': 3,
+                'placeholder': 'Yorumunuzu güncelleyiniz...'
+            })
+        }
+
+    def clean_content(self):
+        content = self.cleaned_data.get('content', '')
+        if content:
+            content = nh3.clean(
+                content,
+                tags={'p', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                      'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'br', 'span', 'a'},
+                attributes={
+                    'a': {'href', 'title', 'target'},
+                    '*': {'class'}
+                }
+            ).strip()
+        if not content:
+            raise forms.ValidationError("Yorum metni boş bırakılamaz.")
+        return content
 
 
 class UserRegisterForm(UserCreationForm):
@@ -234,9 +278,18 @@ class UserRegisterForm(UserCreationForm):
 
 
     def clean_email(self):
-        email = self.cleaned_data.get('email')
-        if User.objects.filter(email=email).exists():
+        email = self.cleaned_data.get('email', '').strip()
+        if not email:
+            return email
+
+        if User.objects.filter(email__iexact=email, is_active=True).exists():
             raise forms.ValidationError("Bu e-posta adresi zaten başka bir hesap tarafından kullanılıyor.")
+
+        inactive_user = User.objects.filter(email__iexact=email, is_active=False).first()
+        if inactive_user:
+            self.inactive_user = inactive_user
+            return email
+
         return email
         
 
@@ -282,7 +335,7 @@ class UserProfileForm(forms.ModelForm):
 
     def clean_email(self):
         email = self.cleaned_data.get('email')
-        if User.objects.filter(email=email).exclude(pk=self.instance.pk).exists():
+        if User.objects.filter(email__iexact=email).exclude(pk=self.instance.pk).exists():
             raise forms.ValidationError("Bu e-posta adresi başka bir kullanıcı tarafından kullanılıyor.")
         return email
 
@@ -307,20 +360,6 @@ class UserProfileForm(forms.ModelForm):
         return user
 
 
-class CommentEditForm(forms.ModelForm):
-    """Yorum düzenleme formu."""
-    class Meta:
-        model = TicketComment
-        fields = ['content']
-        widgets = {
-            'content': forms.Textarea(attrs={
-                'class': 'form-control',
-                'rows': 4,
-                'placeholder': 'Yanıtınızı düzenleyin...'
-            })
-        }
-
-
 from django.contrib.auth.forms import PasswordResetForm
 
 class CustomPasswordResetForm(PasswordResetForm):
@@ -334,17 +373,22 @@ class CustomPasswordResetForm(PasswordResetForm):
         super().send_mail(subject_template_name, email_template_name,
                           context, from_email, to_email, html_email_template_name)
         
-        # Test ve doğrulama için konsola/terminale de açıkça yazdır
+        import logging
+        from django.conf import settings
+        logger = logging.getLogger(__name__)
+
         reset_url = f"{context.get('protocol')}://{context.get('domain')}/reset/{context.get('uid')}/{context.get('token')}/"
         user_obj = context.get('user')
         username = getattr(user_obj, 'username', 'Kullanıcı')
-        
-        print("\n" + "=" * 65)
-        print(" [TEST / GELİŞTİRME] ŞİFRE SIFIRLAMA E-POSTASI GÖNDERİLDİ")
-        print("=" * 65)
-        print(f" Alıcı E-Posta : {to_email}")
-        print(f" Kullanıcı     : {username}")
-        print(f" Sıfırlama URL : {reset_url}")
-        print("=" * 65 + "\n")
+        logger.info("[ŞİFRE SIFIRLAMA] E-posta gönderildi: Alıcı=%s, Kullanıcı=%s", to_email, username)
+
+        if getattr(settings, 'DEBUG', False):
+            print("\n" + "=" * 65)
+            print(" [TEST / GELİŞTİRME] ŞİFRE SIFIRLAMA E-POSTASI GÖNDERİLDİ")
+            print("=" * 65)
+            print(f" Alıcı E-Posta : {to_email}")
+            print(f" Kullanıcı     : {username}")
+            print(f" Sıfırlama URL : {reset_url}")
+            print("=" * 65 + "\n")
 
 

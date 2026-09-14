@@ -1,46 +1,30 @@
 import os
 import mimetypes
 import json
-import re
-import threading
 import logging
-import csv
-import openpyxl
-from datetime import datetime, date
-
 import nh3
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, FileResponse, HttpResponseForbidden, Http404, HttpResponse
 from django.contrib.auth.models import User
-from django.contrib.auth import login, logout, authenticate, update_session_auth_hash
-from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
-from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from django.db import transaction
-from django.db.models import Q, Count, Avg, F
+from django.db.models import Q, Count, F
 from django.core.paginator import Paginator
-from django.core.mail import send_mail
-from django.core.cache import cache
 from django.utils import timezone
-from django.utils.text import slugify
+from django.core.cache import cache
+
 
 from ..models import (
-    Ticket, TicketComment, Category, EmailVerification, TicketActivityLog,
-    Notification, ChatGroup, ChatMessage, UserChatPreference, UserProfile, KnowledgeBaseArticle,
-    TicketRating, CannedResponse, TicketTag
+    Ticket, TicketComment, Category, TicketActivityLog,
+    Notification, UserProfile, TicketRating, TicketTag, CannedResponse
 )
-from ..forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm
-from ..totp import (
-    generate_totp_secret, get_totp_token, verify_totp_token,
-    get_totp_uri, generate_qr_code_data_uri
-)
+from ..forms import TicketForm, CommentForm, CommentEditForm
 from ..pdf import generate_ticket_pdf
 from ..webhooks import send_outgoing_webhook
-from ..copilot import suggest_category_and_priority, generate_ticket_summary
-from ..consumers import ALLOWED_TAGS, ALLOWED_ATTRIBUTES
-from .common import send_notification_email, _async_email_worker
+from .common import send_notification_email
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +80,7 @@ def ticket_list(request):
     urgent_count = counts['urgent']
 
     # 3. URL Arama ve Filtreleme İşlemleri
-    tickets = base_tickets.annotate(comment_count=Count('comments')).select_related('created_by', 'category', 'assigned_to').prefetch_related('comments', 'tags')
+    tickets = base_tickets.annotate(comment_count=Count('comments', distinct=True)).select_related('created_by', 'category', 'assigned_to').prefetch_related('comments', 'tags')
     
     search_query = request.GET.get('q', '').strip()
     selected_status = request.GET.get('status', '').strip()
@@ -201,9 +185,13 @@ def ticket_detail(request, pk):
     comments = ticket.comments.all()
     if not request.user.is_staff:
         comments = comments.filter(is_internal=False)
-    comments = comments.select_related('author')
+    comments = comments.select_related('author', 'author__profile').prefetch_related('likes')
 
     if request.method == 'POST':
+        if ticket.merged_into:
+            messages.warning(request, f"Bu talep #{ticket.merged_into.ticket_number} ana talebi ile birleştirilmiştir. Yanıtınızı ana talep üzerinden iletiniz.")
+            return redirect('ticket_detail', pk=ticket.merged_into.pk)
+
         comment_form = CommentForm(request.POST, request.FILES, user=request.user)
         if comment_form.is_valid():
             comment = comment_form.save(commit=False)
@@ -290,7 +278,7 @@ def ticket_detail(request, pk):
         'ticket': ticket,
         'comments': comments,
         'comment_form': comment_form,
-        'activity_logs': ticket.activity_logs.all(),
+        'activity_logs': ticket.activity_logs.select_related('actor').all(),
         'has_solution': comments.filter(is_solution=True).exists(),
         'canned_responses': canned_responses,
     }
@@ -307,12 +295,24 @@ def ticket_create(request):
     GET isteği geldiğinde boş form gösterir, POST isteğinde doğrular ve kaydeder.
     """
     if request.method == 'POST':
+        # Spam / Bot Koruması: Kullanıcı/IP başına dakikada en fazla 10 talep oluşturma sınırı
+        x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+        client_ip = x_forwarded.split(',')[0].strip() if x_forwarded else (request.META.get('REMOTE_ADDR') or '127.0.0.1')
+        rate_key = f"rate_ticket_create_{client_ip}"
+        recent_creates = cache.get(rate_key, 0)
+        if recent_creates >= 10:
+            messages.error(request, "Çok kısa sürede çok fazla talep oluşturdunuz. Lütfen 1 dakika bekleyiniz.")
+            form = TicketForm(request.POST, request.FILES, user=request.user)
+            return render(request, 'tickets/ticket_form.html', {'form': form})
+
         form = TicketForm(request.POST, request.FILES, user=request.user)
         if form.is_valid():
             ticket = form.save(commit=False)
             ticket.created_by = request.user
             ticket.save()
             form.save_m2m()
+            cache.set(rate_key, recent_creates + 1, timeout=60)
+
             
             TicketActivityLog.objects.create(
                ticket=ticket,
@@ -396,6 +396,13 @@ def ticket_edit(request, pk):
             changes = []
             new_status = updated_ticket.get_status_display()
             new_assigned = updated_ticket.assigned_to.username if updated_ticket.assigned_to else "Atanmadı"
+
+            # Birleştirilmiş talep yeniden açıldıysa (closed dışına çıkarıldıysa) birleştirme bağını kaldır
+            if updated_ticket.merged_into and updated_ticket.status != 'closed':
+                prev_master = updated_ticket.merged_into
+                updated_ticket.merged_into = None
+                updated_ticket.save(update_fields=['merged_into'])
+                changes.append(f"Talep yeniden açıldığı için #{prev_master.ticket_number} ana talep ile birleştirme bağı kaldırıldı.")
 
             # CANLI BİLDİRİM: Durum değiştiyse bildirim oluştur
             if old_status != new_status:
@@ -601,12 +608,6 @@ def download_comment_attachment(request, comment_id):
     return response
 
 
-# --- RAPOR DIŞA AKTARMA (EXCEL / CSV EXPORT) ---
-
-import csv
-from django.http import HttpResponse
-
-
 
 @login_required
 @require_POST
@@ -625,6 +626,14 @@ def toggle_comment_solution(request, comment_id):
         if is_ajax:
             return JsonResponse({'status': 'error', 'message': 'Bu yorumu çözüm olarak işaretleme yetkiniz yok.'}, status=403)
         messages.error(request, "Bu yorumu çözüm olarak işaretleme yetkiniz yok.")
+        return redirect('ticket_detail', pk=ticket.id)
+
+    # Durum kontrolü: Kapatılmış veya birleştirilmiş taleplerde çözüm durumu değiştirilemez
+    if ticket.status == 'closed' or ticket.merged_into:
+        err_msg = "Kapatılmış veya birleştirilmiş taleplerde çözüm durumu değiştirilemez."
+        if is_ajax:
+            return JsonResponse({'status': 'error', 'message': err_msg}, status=400)
+        messages.error(request, err_msg)
         return redirect('ticket_detail', pk=ticket.id)
 
     if comment.is_solution:
@@ -733,15 +742,15 @@ def comment_edit(request, comment_id):
         messages.error(request, "Bu yorumu düzenleme yetkiniz bulunmamaktadır.")
         return redirect('ticket_detail', pk=comment.ticket.pk)
 
-    content = request.POST.get('content', '').strip()
-    if not content:
+    form = CommentEditForm(request.POST, instance=comment)
+    if not form.is_valid():
+        error_msg = form.errors.get('content', ['Geçersiz veya boş yorum içeriği.'])[0]
         if is_ajax:
-            return JsonResponse({'status': 'error', 'message': 'Yorum metni boş bırakılamaz.'}, status=400)
-        messages.error(request, "Yorum metni boş bırakılamaz.")
+            return JsonResponse({'status': 'error', 'message': error_msg}, status=400)
+        messages.error(request, error_msg)
         return redirect('ticket_detail', pk=comment.ticket.pk)
 
-    comment.content = content
-    comment.save()
+    comment = form.save()
 
     TicketActivityLog.objects.create(
         ticket=comment.ticket,
@@ -780,12 +789,28 @@ def comment_delete(request, comment_id):
         messages.error(request, "Bu yorumu silme yetkiniz bulunmamaktadır.")
         return redirect('ticket_detail', pk=ticket_pk)
 
+    author_name = comment.author.username if comment.author else "Silinmiş Kullanıcı"
+    ticket = comment.ticket
+    was_solution = comment.is_solution
+
     TicketActivityLog.objects.create(
-        ticket=comment.ticket,
+        ticket=ticket,
         actor=request.user,
-        action=f"{comment.author.username} kullanıcısının bir yanıtı silindi."
+        action=f"{author_name} kullanıcısının bir yanıtı silindi."
     )
     comment.delete()
+
+    if was_solution:
+        # Başka onaylı çözüm olup olmadığını kontrol et (Kapatılmış veya birleştirilmiş biletleri canlandırma)
+        remaining_solutions = ticket.comments.filter(is_solution=True).exists()
+        if not remaining_solutions and ticket.status == 'resolved' and not ticket.merged_into:
+            ticket.status = 'in_progress'
+            ticket.save(update_fields=['status'])
+            TicketActivityLog.objects.create(
+                ticket=ticket,
+                actor=request.user,
+                action="Çözüm olarak işaretlenmiş yanıt silindiği için talep durumu tekrar 'İşlemde' (in_progress) olarak güncellendi."
+            )
 
     if is_ajax:
         return JsonResponse({
@@ -796,10 +821,6 @@ def comment_delete(request, comment_id):
 
     messages.success(request, "Yorum başarıyla silindi.")
     return redirect('ticket_detail', pk=ticket_pk)
-
-
-# --- BİLGİ BANKASI (KNOWLEDGE BASE / FAQ) GÖRÜNÜMLERİ ---
-
 
 
 @login_required
@@ -841,7 +862,11 @@ def bulk_ticket_action(request):
             for t in tickets:
                 old_status = t.get_status_display()
                 t.status = target_value
-                t.save(update_fields=['status', 'updated_at'])
+                update_fields = ['status', 'updated_at']
+                if t.merged_into and target_value != 'closed':
+                    t.merged_into = None
+                    update_fields.append('merged_into')
+                t.save(update_fields=update_fields)
                 TicketActivityLog.objects.create(
                     ticket=t,
                     actor=request.user,
@@ -920,10 +945,17 @@ def bulk_ticket_action(request):
             return redirect('ticket_list')
 
         tickets_list = list(tickets.order_by('created_at'))
-        primary_ticket = tickets_list[0]
+        # Birleştirilmiş (kapatılmış) olmayan geçerli bir ana talep belirle
+        valid_primaries = [t for t in tickets_list if not t.merged_into]
+        if not valid_primaries:
+            messages.error(request, "Seçilen tüm talepler zaten başka talepler ile birleştirilmiş. Yeni birleştirme yapılamaz.")
+            return redirect('ticket_list')
+
+        primary_ticket = valid_primaries[0]
+        secondaries = [t for t in tickets_list if t.id != primary_ticket.id and t.merged_into != primary_ticket]
         merged_count = 0
 
-        for sec in tickets_list[1:]:
+        for sec in secondaries:
             sec.merged_into = primary_ticket
             sec.status = 'closed'
             sec.save(update_fields=['merged_into', 'status', 'updated_at'])
@@ -985,9 +1017,18 @@ def merge_tickets_view(request):
     primary_ticket = get_object_or_404(Ticket, id=primary_id)
     secondary_ticket = get_object_or_404(Ticket, id=secondary_id)
 
+    if primary_ticket.merged_into:
+        messages.error(request, "Birleştirilmiş (kapatılmış) bir talep ana talep olarak seçilemez.")
+        return redirect('ticket_detail', pk=primary_ticket.pk)
+
     secondary_ticket.merged_into = primary_ticket
     secondary_ticket.status = 'closed'
     secondary_ticket.save(update_fields=['merged_into', 'status', 'updated_at'])
+
+    # İkincil talebe daha önce birleştirilmiş olan alt talepler varsa ana talebe devret
+    for child in secondary_ticket.merged_tickets.exclude(pk=primary_ticket.pk):
+        child.merged_into = primary_ticket
+        child.save(update_fields=['merged_into', 'updated_at'])
 
     for tg in secondary_ticket.tags.all():
         primary_ticket.tags.add(tg)
@@ -1016,11 +1057,4 @@ def merge_tickets_view(request):
 
     messages.success(request, f"#{secondary_ticket.ticket_number} talebi başarıyla #{primary_ticket.ticket_number} ana talebine birleştirildi.")
     return redirect('ticket_detail', pk=primary_ticket.pk)
-
-
-
-# ==========================================
-# 2FA (İKİ AŞAMALI DOĞRULAMA - TOTP) GÖRÜNÜMLERİ
-# ==========================================
-
 

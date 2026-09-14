@@ -431,6 +431,8 @@ class TicketCommentConsumer(AsyncWebsocketConsumer):
         """Gelen canlı yorumu veritabanına kaydeder ve bildirimleri tetikler"""
         try:
             ticket = Ticket.objects.select_related('created_by', 'category', 'assigned_to').get(id=self.ticket_id)
+            if ticket.merged_into:
+                return None
 
             clean_content = nh3.clean(raw_content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES)
             comment = TicketComment.objects.create(

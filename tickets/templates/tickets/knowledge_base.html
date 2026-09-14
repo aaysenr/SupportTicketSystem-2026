@@ -163,4 +163,22 @@
     box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important;
 }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const kbSearch = document.querySelector('form[action="{% url "knowledge_base" %}"] input[name="q"]');
+    if (kbSearch) {
+        let timer;
+        kbSearch.addEventListener('input', () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+                if (kbSearch.value.trim().length >= 3 || kbSearch.value.trim().length === 0) {
+                    kbSearch.form.submit();
+                }
+            }, 500);
+        });
+    }
+});
+</script>
 {% endblock %}
+

@@ -1557,13 +1557,816 @@ class ArchitectureSecurityAndAccountDeletionTests(TestCase):
         self.assertTrue(self.superadmin.is_superuser)
 
 
+class RegistrationUXAndHardDeleteProtectionTest(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.active_user = User.objects.create_user(
+            username='active_alice',
+            email='alice@example.com',
+            password='Password123!'
+        )
+        self.inactive_user = User.objects.create_user(
+            username='inactive_bob',
+            email='bob@example.com',
+            password='Password123!',
+            is_active=False
+        )
+        self.staff_user = User.objects.create_user(
+            username='staff_carl',
+            email='carl@example.com',
+            password='Password123!',
+            is_staff=True
+        )
+        self.category = Category.objects.create(name='Genel Destek')
+        self.ticket = Ticket.objects.create(
+            title='Test Ticket',
+            description='Açıklama',
+            created_by=self.active_user,
+            category=self.category
+        )
+
+    def test_register_with_active_user_email_fails(self):
+        """Aktif bir kullanıcının e-postası ile kayıt olmaya çalışıldığında hata verilmelidir."""
+        from captcha.models import CaptchaStore
+        hashkey = CaptchaStore.generate_key()
+        response_code = CaptchaStore.objects.get(hashkey=hashkey).response
+
+        register_url = reverse('register')
+        res = self.client.post(register_url, {
+            'username': 'new_alice',
+            'email': 'alice@example.com',
+            'password1': 'NewPass123!',
+            'password2': 'NewPass123!',
+            'captcha_0': hashkey,
+            'captcha_1': response_code
+        })
+        self.assertEqual(res.status_code, 200)
+        self.assertFormError(res.context['form'], 'email', "Bu e-posta adresi zaten başka bir hesap tarafından kullanılıyor.")
+
+    def test_register_with_inactive_user_email_smart_redirects(self):
+        """Onay bekleyen (is_active=False) kullanıcının e-postası ile tekrar kayıt olunduğunda akıllı yönlendirme yapılmalıdır."""
+        from captcha.models import CaptchaStore
+        hashkey = CaptchaStore.generate_key()
+        response_code = CaptchaStore.objects.get(hashkey=hashkey).response
+
+        register_url = reverse('register')
+        res = self.client.post(register_url, {
+            'username': 'inactive_bob',
+            'email': 'bob@example.com',
+            'password1': 'Password123!',
+            'password2': 'Password123!',
+            'captcha_0': hashkey,
+            'captcha_1': response_code
+        })
+        self.assertEqual(res.status_code, 302)
+        self.assertRedirects(res, reverse('verify_email'))
+        self.assertEqual(self.client.session.get('unverified_user_id'), self.inactive_user.id)
+
+        # Yeni onay kodunun üretildiğini doğrula
+        verification = EmailVerification.objects.get(user=self.inactive_user)
+        self.assertTrue(verification.is_valid())
+        self.assertEqual(len(verification.code), 6)
+
+    def test_register_with_inactive_user_email_invalid_captcha_fails(self):
+        """Onay bekleyen kullanıcı olsa bile güvenlik kodu hatalıysa yönlendirme yapılmamalıdır."""
+        from captcha.models import CaptchaStore
+        hashkey = CaptchaStore.generate_key()
+
+        register_url = reverse('register')
+        res = self.client.post(register_url, {
+            'username': 'inactive_bob',
+            'email': 'bob@example.com',
+            'password1': 'Password123!',
+            'password2': 'Password123!',
+            'captcha_0': hashkey,
+            'captcha_1': 'WRONGCODE'
+        })
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('captcha', res.context['form'].errors)
+
+    def test_canned_response_preserved_on_user_hard_delete(self):
+        """Kullanıcı hard-delete ile silinse dahi CannedResponse şablonu silinmemeli, created_by SET_NULL olmalıdır."""
+        canned = CannedResponse.objects.create(
+            title="Hard Delete Test Şablonu",
+            content="Yanıt içeriği...",
+            category=self.category,
+            created_by=self.staff_user
+        )
+        canned_id = canned.id
+
+        # Personeli hard-delete yapalım (Django admin simülasyonu)
+        self.staff_user.delete()
+
+        canned.refresh_from_db()
+        self.assertEqual(canned.id, canned_id)
+        self.assertIsNone(canned.created_by)
+
+    def test_ticket_rating_preserved_on_user_hard_delete(self):
+        """Kullanıcı hard-delete ile silinse dahi CSAT memnuniyet değerlendirmesi korunmalı, user SET_NULL olmalıdır."""
+        rating_user = User.objects.create_user(
+            username='rating_user',
+            email='rating@example.com',
+            password='Password123!'
+        )
+        rating = TicketRating.objects.create(
+            ticket=self.ticket,
+            user=rating_user,
+            score=5,
+            feedback="Harika hizmet!"
+        )
+        rating_id = rating.id
+
+        # Müşteriyi hard-delete yapalım
+        rating_user.delete()
+
+        rating.refresh_from_db()
+        self.assertEqual(rating.id, rating_id)
+        self.assertIsNone(rating.user)
+        self.assertEqual(rating.score, 5)
+        self.assertEqual(rating.feedback, "Harika hizmet!")
 
 
+class Phase1To4AuditWorkflowTests(TestCase):
+    """
+    Raporlanan 4 Aşama kapsamındaki tüm güvenlik, performans, kod temizliği ve UX
+    düzeltmelerinin uçtan uca doğrulanmasını sağlayan test suite.
+    """
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='audit_user',
+            email='audit@example.com',
+            password='Password123!'
+        )
+        self.staff_user = User.objects.create_user(
+            username='audit_staff',
+            email='staff@example.com',
+            password='Password123!',
+            is_staff=True,
+            is_superuser=True
+        )
+        self.category = Category.objects.create(name='Denetim Kategorisi')
+        self.ticket = Ticket.objects.create(
+            title='Denetim Test Talebi',
+            description='Test detayları',
+            created_by=self.user,
+            category=self.category,
+            status='open',
+            is_public=True
+        )
+
+    def test_comment_form_xss_sanitization(self):
+        """Aşama 1.A: CommentForm ve comment_edit görünümünde XSS kodlarının temizlendiğini doğrula."""
+        from tickets.forms import CommentForm
+        raw_xss = "Merhaba <script>alert('xss')</script><b>Kalın Yazı</b>"
+        form = CommentForm(data={'content': raw_xss})
+        self.assertTrue(form.is_valid())
+        cleaned = form.cleaned_data['content']
+        self.assertNotIn('<script>', cleaned)
+        self.assertIn('Kalın Yazı', cleaned)
+
+        # AJAX Düzenlemede XSS temizliği
+        self.client.login(username='audit_user', password='Password123!')
+        comment = TicketComment.objects.create(
+            ticket=self.ticket,
+            author=self.user,
+            content="İlk içerik"
+        )
+        edit_url = reverse('comment_edit', kwargs={'comment_id': comment.id})
+        res = self.client.post(edit_url, {'content': "Yeni <img src=x onerror=alert(1)> deneme"}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(res.status_code, 200)
+        comment.refresh_from_db()
+        self.assertNotIn('onerror', comment.content)
+
+    def test_inbound_email_impersonation_blocked(self):
+        """Aşama 1.B: Sistemde kayıtlı olmayan göndericilerin talep sahibi adına yanıt eklemesinin engellendiğini doğrula."""
+        from django.conf import settings
+        secret = getattr(settings, 'INBOUND_EMAIL_WEBHOOK_SECRET', settings.SECRET_KEY[:32])
+        url = reverse('inbound_email_webhook')
+
+        # Kayıtlı olmayan e-posta ile webhook simülasyonu
+        res = self.client.post(
+            f"{url}?token={secret}",
+            data={
+                'from': 'sahte@saldirgan.com',
+                'subject': f"Re: #{self.ticket.ticket_number} Konu",
+                'body': 'Yetkisiz sahte yanıt'
+            }
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('kayıtlı bir kullanıcı bulunamadı', res.json()['error'])
+        self.assertEqual(self.ticket.comments.count(), 0)
+
+    def test_ticket_comment_author_set_null_on_hard_delete(self):
+        """Aşama 1.C: Kullanıcı hard-delete ile silinse dahi yanıtın silinmediğini ve author=None olduğunu doğrula."""
+        commenter = User.objects.create_user(
+            username='temp_commenter',
+            email='commenter@example.com',
+            password='Password123!'
+        )
+        comment = TicketComment.objects.create(
+            ticket=self.ticket,
+            author=commenter,
+            content="Silinmemesi gereken çözüm içeriği"
+        )
+        comment_id = comment.id
+
+        # Yorum yazarı olan kullanıcıyı hard-delete yapalım
+        commenter.delete()
+
+        comment.refresh_from_db()
+        self.assertEqual(comment.id, comment_id)
+        self.assertIsNone(comment.author)
+        self.assertIn("Silinmiş Kullanıcı", str(comment))
+
+    def test_tag_api_sanitization_and_ticket_count(self):
+        """Aşama 1.D & 2.C: Etiket API'sinde özel karakterlerin temizlendiğini ve liste API'sinde ticket_count döndüğünü doğrula."""
+        from tickets.models import TicketTag
+        self.client.login(username='audit_staff', password='Password123!')
+        
+        # 1. Özel karakter ve HTML enjeksiyonlu etiket adı
+        create_res = self.client.post(
+            reverse('create_tag_api'),
+            data=json.dumps({'name': '<script>"Guvenli_Tag"!</script>'}),
+            content_type='application/json'
+        )
+        self.assertEqual(create_res.status_code, 200)
+        tag_data = create_res.json()['tag']
+        self.assertNotIn('<script>', tag_data['name'])
+        self.assertNotIn('"', tag_data['name'])
+
+        tag = TicketTag.objects.get(id=tag_data['id'])
+        self.ticket.tags.add(tag)
+
+        # 2. list_tags_api'de N+1 engellenmiş ticket_count
+        list_res = self.client.get(reverse('list_tags_api'))
+        self.assertEqual(list_res.status_code, 200)
+        tags_list = list_res.json()['tags']
+        matched = [t for t in tags_list if t['id'] == tag.id][0]
+        self.assertEqual(matched['ticket_count'], 1)
+
+    def test_export_tickets_csv_and_excel(self):
+        """Aşama 2.A: CSV ve Excel dışa aktarmaların sorunsuz çalıştığını ve comment_count kullandığını doğrula."""
+        self.client.login(username='audit_staff', password='Password123!')
+        TicketComment.objects.create(
+            ticket=self.ticket,
+            author=self.staff_user,
+            content="Test yanıtı"
+        )
+
+        # CSV
+        res_csv = self.client.get(reverse('export_tickets_csv'))
+        self.assertEqual(res_csv.status_code, 200)
+        self.assertIn(self.ticket.ticket_number, res_csv.content.decode('utf-8-sig'))
+
+        # Excel
+        res_excel = self.client.get(reverse('export_tickets_excel'))
+        self.assertEqual(res_excel.status_code, 200)
+
+    def test_extended_religious_holidays_calendar(self):
+        """Aşama 3.C: 2029-2035 arası uzatılmış dini bayram takviminin doğru çalıştığını doğrula."""
+        from datetime import datetime
+        from tickets.models import is_holiday_or_weekend
+
+        # 2029 Ramazan Bayramı (15 Şubat 2029 - Perşembe)
+        dt_2029 = datetime(2029, 2, 15)
+        self.assertTrue(is_holiday_or_weekend(dt_2029))
+
+        # 2035 Kurban Bayramı (19 Şubat 2035 - Pazartesi)
+        dt_2035 = datetime(2035, 2, 19)
+        self.assertTrue(is_holiday_or_weekend(dt_2035))
+
+        # Sıradan bir mesai günü (10 Nisan 2029 - Salı)
+        dt_workday = datetime(2029, 4, 10)
+        self.assertFalse(is_holiday_or_weekend(dt_workday))
+
+    def test_login_with_email(self):
+        """Aşama 4.A: Giriş ekranında kullanıcı adı yerine e-posta ile oturum açılabildiğini doğrula."""
+        res = self.client.post(reverse('login'), {
+            'username': 'audit@example.com',
+            'password': 'Password123!'
+        })
+        self.assertRedirects(res, reverse('ticket_list'))
+
+    def test_login_unverified_account_with_email(self):
+        """Aşama 4.A: Henüz onaylanmamış bir hesaba e-posta ile giriş yapıldığında verify_email'e yönlendirildiğini doğrula."""
+        unverified = User.objects.create_user(
+            username='unverified_user',
+            email='unverified@example.com',
+            password='Password123!',
+            is_active=False
+        )
+        res = self.client.post(reverse('login'), {
+            'username': 'unverified@example.com',
+            'password': 'Password123!'
+        })
+        self.assertRedirects(res, reverse('verify_email'))
+        self.assertEqual(self.client.session.get('unverified_user_id'), unverified.id)
+
+    def test_comment_solution_delete_reverts_ticket_status(self):
+        """Aşama 4.B: Çözüm olan yanıt silindiğinde başka onaylı çözüm kalmadıysa talep durumunun in_progress olduğunu doğrula."""
+        self.client.login(username='audit_staff', password='Password123!')
+        solution_comment = TicketComment.objects.create(
+            ticket=self.ticket,
+            author=self.staff_user,
+            content="Harika Çözüm",
+            is_solution=True
+        )
+        self.ticket.status = 'resolved'
+        self.ticket.save(update_fields=['status'])
+
+        # Çözüm olan yorumu silelim
+        del_url = reverse('comment_delete', kwargs={'comment_id': solution_comment.id})
+        res = self.client.post(del_url)
+        self.assertRedirects(res, reverse('ticket_detail', kwargs={'pk': self.ticket.pk}))
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.status, 'in_progress')
+        # Aktivite kaydı düşüldüğünü doğrula
+        self.assertTrue(self.ticket.activity_logs.filter(action__icontains="tekrar 'İşlemde'").exists())
 
 
+class SecondPassAuditWorkflowTests(TestCase):
+    """
+    İkinci denetim kapsamında tespit edilen 1-4. aşamalardaki tüm özelliklerin
+    ve düzeltmelerin doğrulanmasını sağlayan test suite.
+    """
+    def setUp(self):
+        self.client = Client()
+        self.super_user = User.objects.create_superuser('audit2_super', 'super2@example.com', 'AdminPass123!')
+        self.staff_user = User.objects.create_user('audit2_staff', 'staff2@example.com', 'StaffPass123!', is_staff=True)
+        self.user = User.objects.create_user('audit2_user', 'user2@example.com', 'UserPass123!')
+        self.category = Category.objects.create(name='Denetim 2 Kategorisi')
+        self.ticket = Ticket.objects.create(
+            title='İkinci Denetim Test Talebi',
+            description='Test açıklaması',
+            created_by=self.user,
+            category=self.category,
+            status='open',
+            is_public=True
+        )
 
+    def test_pdf_export_with_null_author_comments_and_solution(self):
+        """1.A: Yorum veya çözüm yazarı silinmiş (author=None) olduğunda PDF export çökmeksizin üretilmeli."""
+        TicketComment.objects.create(
+            ticket=self.ticket,
+            author=None,
+            content="Silinmiş kullanıcıdan onaylı çözüm",
+            is_solution=True
+        )
+        TicketComment.objects.create(
+            ticket=self.ticket,
+            author=None,
+            content="Silinmiş kullanıcıdan normal yorum"
+        )
+        from tickets.pdf import generate_ticket_pdf
+        buffer = generate_ticket_pdf(self.ticket)
+        self.assertIsNotNone(buffer)
+        self.assertTrue(len(buffer.getvalue()) > 0)
 
+    def test_reopening_merged_ticket_clears_merged_into(self):
+        """1.B: Birleştirilmiş (closed) talep yeniden açıldığında merged_into bağı temizlenmeli."""
+        primary_ticket = Ticket.objects.create(
+            title='Ana Talep',
+            description='Ana talep detayı',
+            created_by=self.user,
+            category=self.category,
+            status='open'
+        )
+        self.ticket.merged_into = primary_ticket
+        self.ticket.status = 'closed'
+        self.ticket.save(update_fields=['merged_into', 'status'])
 
+        self.client.login(username='audit2_super', password='AdminPass123!')
+        edit_url = reverse('ticket_edit', kwargs={'pk': self.ticket.pk})
+        res = self.client.post(edit_url, {
+            'title': self.ticket.title,
+            'description': self.ticket.description,
+            'category': self.category.id,
+            'priority': 'medium',
+            'status': 'in_progress',
+        })
+        self.assertRedirects(res, reverse('ticket_detail', kwargs={'pk': self.ticket.pk}))
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.status, 'in_progress')
+        self.assertIsNone(self.ticket.merged_into)
+        self.assertTrue(self.ticket.activity_logs.filter(action__icontains="birleştirme bağı kaldırıldı").exists())
 
+    def test_check_sla_breaches_management_command(self):
+        """2.A: check_sla_breaches komutu geciken talepleri bulup bildirim ve log oluşturmalı."""
+        overdue_ticket = Ticket.objects.create(
+            title='SLA Geciken Talep',
+            description='Gecikme testi',
+            created_by=self.user,
+            assigned_to=self.staff_user,
+            category=self.category,
+            status='open',
+            first_response_at=None
+        )
+        Ticket.objects.filter(id=overdue_ticket.id).update(sla_deadline=timezone.now() - timedelta(hours=3))
 
+        out = StringIO()
+        call_command('check_sla_breaches', stdout=out)
+        self.assertIn("SLA denetimi tamamlandı", out.getvalue())
+
+        # Bildirim ve aktivite kontrolü
+        self.assertTrue(Notification.objects.filter(recipient=self.staff_user, ticket=overdue_ticket).exists())
+        self.assertTrue(overdue_ticket.activity_logs.filter(action__icontains="SLA Süresi Aşıldı!").exists())
+
+    def test_cleanup_unverified_accounts_management_command(self):
+        """2.B: cleanup_unverified_accounts komutu süresi dolmuş inaktif hesapları silmeli."""
+        old_unverified = User.objects.create_user(
+            username='old_unverified_user',
+            email='old_unverified@example.com',
+            password='Password123!',
+            is_active=False
+        )
+        old_unverified.date_joined = timezone.now() - timedelta(days=10)
+        old_unverified.save(update_fields=['date_joined'])
+        EmailVerification.objects.create(user=old_unverified, code='111111')
+
+        recent_unverified = User.objects.create_user(
+            username='recent_unverified_user',
+            email='recent_unverified@example.com',
+            password='Password123!',
+            is_active=False
+        )
+        recent_unverified.date_joined = timezone.now() - timedelta(days=1)
+        recent_unverified.save(update_fields=['date_joined'])
+        EmailVerification.objects.create(user=recent_unverified, code='222222')
+
+        out = StringIO()
+        call_command('cleanup_unverified_accounts', days=7, stdout=out)
+        self.assertIn("temizlendi", out.getvalue())
+
+        self.assertFalse(User.objects.filter(username='old_unverified_user').exists())
+        self.assertTrue(User.objects.filter(username='recent_unverified_user').exists())
+
+    def test_change_password_and_disable_2fa_alert_emails(self):
+        """2.C: Şifre değişikliği ve 2FA kapatma işlemlerinin e-posta uyarısı tetiklediğini doğrula."""
+        from django.core import mail
+        mail.outbox = []
+
+        self.client.login(username='audit2_user', password='UserPass123!')
+        res = self.client.post(reverse('change_password'), {
+            'old_password': 'UserPass123!',
+            'new_password1': 'NewPass456!Secure',
+            'new_password2': 'NewPass456!Secure',
+        })
+        self.assertRedirects(res, reverse('profile'))
+        # E-posta uyarısı gönderildiğini doğrula
+        self.assertTrue(any("Hesap Şifreniz Değiştirildi" in m.subject for m in mail.outbox))
+
+        # 2FA Kapatma uyarısını test et
+        self.user.profile.is_2fa_enabled = True
+        self.user.profile.totp_secret = "JBSWY3DPEHPK3PXP"
+        self.user.profile.save()
+
+        res_2fa = self.client.post(reverse('disable_2fa'), {
+            'password': 'NewPass456!Secure'
+        })
+        self.assertRedirects(res_2fa, reverse('profile'))
+        self.user.profile.refresh_from_db()
+        self.assertFalse(self.user.profile.is_2fa_enabled)
+        self.assertTrue(any("İki Aşamalı Doğrulama" in m.subject for m in mail.outbox))
+
+    def test_comment_edit_form_and_sanitization(self):
+        """3.A: CommentEditForm ile yorum düzenlemenin XSS temizliği yapıp kaydedildiğini doğrula."""
+        comment = TicketComment.objects.create(
+            ticket=self.ticket,
+            author=self.user,
+            content="Eski Yorum"
+        )
+        self.client.force_login(self.user)
+        edit_url = reverse('comment_edit', kwargs={'comment_id': comment.id})
+        res = self.client.post(edit_url, {
+            'content': 'Güvenli <script>alert("xss")</script><b>Kalın</b> Güncelleme'
+        })
+        self.assertRedirects(res, reverse('ticket_detail', kwargs={'pk': self.ticket.pk}))
+        comment.refresh_from_db()
+        self.assertNotIn("<script>", comment.content)
+        self.assertIn("<b>Kalın</b>", comment.content)
+
+    def test_dashboard_mttr_calculation(self):
+        """4.B: Yönetici paneli MTTR hesaplamasının çalıştığını doğrula."""
+        self.ticket.status = 'resolved'
+        self.ticket.created_at = timezone.now() - timedelta(hours=5)
+        self.ticket.save()
+
+        self.client.login(username='audit2_super', password='AdminPass123!')
+        res = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('mttr_display', res.context)
+        self.assertIn('mttr_hours', res.context)
+        self.assertContains(res, "Ortalama Çözüm Süresi")
+
+    def test_cleanup_unverified_accounts_safety(self):
+        """1.1: cleanup_unverified_accounts komutunun bilet sahibi veya anonimleştirilmiş hesapları silmediğini doğrula."""
+        from django.core.management import call_command
+        from tickets.models import EmailVerification
+
+        # 1. Unverified user with tickets (should NOT be deleted due to PROTECT / tickets__isnull=True)
+        user_with_ticket = User.objects.create_user(username='unverified_with_ticket', email='uwt@example.com', password='password123', is_active=False)
+        user_with_ticket.date_joined = timezone.now() - timedelta(days=10)
+        user_with_ticket.save()
+        EmailVerification.objects.create(user=user_with_ticket, code='123456')
+        Ticket.objects.create(title='Unverified Ticket', description='Desc', created_by=user_with_ticket)
+
+        # 2. Soft-deleted / anonymized user (should NOT be deleted)
+        deleted_user = User.objects.create_user(username='deleted_user_12345', email='del@example.com', password='password123', is_active=False)
+        deleted_user.date_joined = timezone.now() - timedelta(days=15)
+        deleted_user.save()
+
+        # 3. Truly unverified user with no tickets (SHOULD be deleted)
+        unverified_abandoned = User.objects.create_user(username='abandoned_reg', email='aban@example.com', password='password123', is_active=False)
+        unverified_abandoned.date_joined = timezone.now() - timedelta(days=8)
+        unverified_abandoned.save()
+        EmailVerification.objects.create(user=unverified_abandoned, code='654321')
+
+        call_command('cleanup_unverified_accounts')
+
+        self.assertTrue(User.objects.filter(id=user_with_ticket.id).exists(), "Talebi olan kullanıcı silinmemeli.")
+        self.assertTrue(User.objects.filter(id=deleted_user.id).exists(), "deleted_user_ önekli anonim kullanıcı silinmemeli.")
+        self.assertFalse(User.objects.filter(id=unverified_abandoned.id).exists(), "Talebi olmayan ve onaylanmamış kullanıcı silinmeli.")
+
+    def test_inbound_email_webhook_notification_email(self):
+        """1.2: E-posta webhook ile gelen yanıtta ilgili kişilere e-posta bildirimi gönderildiğini doğrula."""
+        from django.core import mail
+        from django.conf import settings
+        self.ticket.assigned_to = self.staff_user
+        self.ticket.save()
+
+        mail.outbox.clear()
+        secret = getattr(settings, 'INBOUND_EMAIL_WEBHOOK_SECRET', settings.SECRET_KEY[:32])
+        webhook_url = reverse('inbound_email_webhook')
+        payload = {
+            'from': f"{self.user.username} <{self.user.email}>",
+            'subject': f"Re: [Destek Talebi] #{self.ticket.ticket_number} Talebinize Yeni Yanıt Geldi",
+            'text': "E-posta üzerinden iletilen yanıt metni.",
+        }
+        res = self.client.post(webhook_url, data=json.dumps(payload), content_type='application/json', HTTP_X_WEBHOOK_SECRET=secret)
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(TicketComment.objects.filter(ticket=self.ticket, content__contains='E-posta üzerinden iletilen').exists())
+
+        # Asenkron e-posta thread'inin tamamlanmasını bekle
+        import time
+        email_sent = False
+        for _ in range(30):
+            if any(self.staff_user.email in m.to for m in mail.outbox):
+                email_sent = True
+                break
+            time.sleep(0.1)
+
+        self.assertTrue(email_sent, "Sorumlu personele (staff_user) e-posta bildirimi ulaşmalı.")
+
+    def test_merged_ticket_comment_blocking(self):
+        """2.1: Birleştirilmiş bilete POST ile yorum eklenmesinin engellendiğini ve ana bilete yönlendirdiğini doğrula."""
+        master_ticket = Ticket.objects.create(title='Ana Bilet', description='Ana bilet açıklaması', created_by=self.user)
+        merged_ticket = Ticket.objects.create(title='Yan Bilet', description='Mükerrer bilet', created_by=self.user, merged_into=master_ticket)
+
+        self.client.force_login(self.user)
+        res = self.client.post(reverse('ticket_detail', kwargs={'pk': merged_ticket.pk}), {
+            'content': 'Mükerrer bilete yorum yazmaya çalışıyorum.'
+        })
+        self.assertRedirects(res, reverse('ticket_detail', kwargs={'pk': master_ticket.pk}))
+        self.assertFalse(TicketComment.objects.filter(ticket=merged_ticket).exists())
+
+    def test_notification_post_actions(self):
+        """2.2: Bildirim silme ve toplu okundu işlemlerinin POST istekleriyle güvenle çalıştığını doğrula."""
+        n1 = Notification.objects.create(recipient=self.user, message="Test bildirim 1", is_read=False)
+        n2 = Notification.objects.create(recipient=self.user, message="Test bildirim 2", is_read=False)
+
+        self.client.force_login(self.user)
+
+        # Mark all as read via POST
+        res_read = self.client.post(reverse('mark_all_notifications_read'))
+        self.assertRedirects(res_read, reverse('notifications_list'))
+        n1.refresh_from_db()
+        n2.refresh_from_db()
+        self.assertTrue(n1.is_read)
+        self.assertTrue(n2.is_read)
+
+        # Delete single notification via POST
+        res_del = self.client.post(reverse('delete_notification', kwargs={'pk': n1.pk}))
+        self.assertRedirects(res_del, reverse('notifications_list'))
+        self.assertFalse(Notification.objects.filter(pk=n1.pk).exists())
+
+        # Delete all notifications via POST
+        res_del_all = self.client.post(reverse('delete_all_notifications'))
+        self.assertRedirects(res_del_all, reverse('notifications_list'))
+        self.assertEqual(Notification.objects.filter(recipient=self.user).count(), 0)
+
+    def test_kb_suggest_api_reverse_urls(self):
+        """3.2: kb_suggest_api'nin dinamik reverse() URL'leri döndürdüğünü doğrula."""
+        from tickets.models import KnowledgeBaseArticle
+        article = KnowledgeBaseArticle.objects.create(
+            title="Outlook Kurulum Rehberi",
+            content="Outlook e-posta istemcisi nasıl kurulur rehberi.",
+            is_published=True
+        )
+        self.client.force_login(self.user)
+        res = self.client.get(reverse('kb_suggest_api') + '?q=Outlook')
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(len(data.get('suggestions', [])) > 0)
+        kb_item = next(s for s in data['suggestions'] if s['type'] == 'kb')
+        self.assertEqual(kb_item['url'], reverse('knowledge_base_detail', kwargs={'pk': article.id}))
+
+    def test_copilot_generate_ticket_summary_safety(self):
+        """4.2: generate_ticket_summary'nin created_by None olduğunda veya tam isim olduğunda çökmediğini doğrula."""
+        from tickets.copilot import generate_ticket_summary
+        
+        # Tam isimli kullanıcı
+        self.user.first_name = "Ahmet"
+        self.user.last_name = "Yılmaz"
+        self.user.save()
+        summary = generate_ticket_summary(self.ticket)
+        self.assertIn("Ahmet Yılmaz", summary)
+
+        # created_by None durumu
+        orphan_ticket = Ticket(title="Sahipsiz Talep", description="Açıklama metni", created_by=None)
+        summary_orphan = generate_ticket_summary(orphan_ticket)
+        self.assertIn("Bilinmeyen Kullanıcı", summary_orphan)
+
+    def test_export_tickets_created_by_none(self):
+        """1.1: export_tickets_csv ve excel'de created_by=None çökme koruması testi."""
+        from unittest.mock import patch
+        from tickets.models import Category
+        cat = Category.objects.first() or Category.objects.create(name="Genel")
+        mock_ticket = Ticket(
+            id=9999,
+            title="Kullanıcısız Talep",
+            description="Açıklama",
+            category=cat,
+            created_by=None
+        )
+
+        self.client.force_login(self.super_user)
+        with patch('tickets.views.dashboard_views._get_filtered_tickets_qs', return_value=[mock_ticket]):
+            # CSV Export
+            res_csv = self.client.get(reverse('export_tickets_csv'))
+            self.assertEqual(res_csv.status_code, 200)
+            self.assertIn("Silinmiş Kullanıcı", res_csv.content.decode('utf-8-sig'))
+
+            # Excel Export
+            res_excel = self.client.get(reverse('export_tickets_excel'))
+            self.assertEqual(res_excel.status_code, 200)
+
+    def test_webhook_creator_name_none(self):
+        """1.2: webhooks.py'de created_by=None durumunda çökme koruması testi."""
+        from tickets.webhooks import send_outgoing_webhook
+        from tickets.models import Category
+        cat = Category.objects.first() or Category.objects.create(name="Genel")
+        orphan_ticket = Ticket(
+            id=9998,
+            title="Webhooks Sahipsiz Talep",
+            description="Açıklama",
+            category=cat,
+            created_by=None
+        )
+        # send_outgoing_webhook should safely execute without AttributeError
+        send_outgoing_webhook(orphan_ticket, 'ticket_created')
+
+    def test_consumer_save_ticket_comment_merged_rejected(self):
+        """1.3: WebSocket save_ticket_comment birleştirilmiş talepte None döndürür."""
+        from tickets.consumers import TicketCommentConsumer
+        from asgiref.sync import async_to_sync
+        from tickets.models import Category
+        cat = Category.objects.first() or Category.objects.create(name="Genel")
+        t1 = Ticket.objects.create(title="Ana Talep", description="Açıklama", category=cat, created_by=self.user)
+        t2 = Ticket.objects.create(title="Alt Talep", description="Açıklama", category=cat, created_by=self.user, merged_into=t1)
+
+        consumer = TicketCommentConsumer()
+        consumer.ticket_id = t2.id
+        consumer.user = self.user
+        res = async_to_sync(consumer.save_ticket_comment)("Canlı yorum denemesi", False)
+        self.assertIsNone(res)
+
+    def test_inbound_email_merged_ticket_reroute(self):
+        """2.1: Birleştirilmiş bilete gelen e-postanın ana talebe akıllı yönlendirilmesi."""
+        from django.conf import settings
+        from tickets.models import Category
+        cat = Category.objects.first() or Category.objects.create(name="Genel")
+        t_primary = Ticket.objects.create(title="Ana Talep", description="Açıklama", category=cat, created_by=self.user)
+        t_secondary = Ticket.objects.create(title="Alt Talep", description="Açıklama", category=cat, created_by=self.user, merged_into=t_primary)
+
+        payload = {
+            'sender': self.user.email,
+            'subject': f"Re: [Destek #{t_secondary.ticket_number}] Sorun Devam Ediyor",
+            'body': "Birleştirilmiş bilete yanıt gönderiyorum."
+        }
+        secret = getattr(settings, 'INBOUND_EMAIL_WEBHOOK_SECRET', settings.SECRET_KEY[:32])
+        res = self.client.post(
+            reverse('inbound_email_webhook'),
+            data=json.dumps(payload),
+            content_type='application/json',
+            HTTP_X_WEBHOOK_SECRET=secret
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data['status'], 'success')
+        self.assertEqual(data['ticket_number'], t_primary.ticket_number)
+
+        # Ana talepte yönlendirme ibaresi kontrolü
+        latest_comment = t_primary.comments.last()
+        self.assertIsNotNone(latest_comment)
+        self.assertIn(f"[E-posta #{t_secondary.ticket_number} birleştirilmiş talebinden aktarıldı]", latest_comment.content)
+
+    def test_merge_tickets_validation_and_cascade(self):
+        """2.2: Talep birleştirmede döngüsel/zincirleme koruması ve alt talep aktarımı."""
+        from tickets.models import Category
+        cat = Category.objects.first() or Category.objects.create(name="Genel")
+        t_a = Ticket.objects.create(title="Talep A", description="Açıklama", category=cat, created_by=self.user)
+        t_b = Ticket.objects.create(title="Talep B", description="Açıklama", category=cat, created_by=self.user)
+        t_c = Ticket.objects.create(title="Talep C", description="Açıklama", category=cat, created_by=self.user)
+
+        self.client.force_login(self.super_user)
+
+        # B'ye C'yi bağla
+        self.client.post(reverse('merge_tickets'), {
+            'primary_ticket_id': t_b.pk,
+            'secondary_ticket_id': t_c.pk
+        })
+        t_c.refresh_from_db()
+        self.assertEqual(t_c.merged_into, t_b)
+
+        # 1. Şimdi C (zaten birleştirilmiş) ana talep olarak seçilemez
+        res_fail = self.client.post(reverse('merge_tickets'), {
+            'primary_ticket_id': t_c.pk,
+            'secondary_ticket_id': t_a.pk
+        })
+        t_a.refresh_from_db()
+        self.assertIsNone(t_a.merged_into)
+
+        # 2. A ana talep, B ikincil talep yapıldığında C de otomatik olarak A'ya aktarılmalıdır
+        self.client.post(reverse('merge_tickets'), {
+            'primary_ticket_id': t_a.pk,
+            'secondary_ticket_id': t_b.pk
+        })
+        t_b.refresh_from_db()
+        t_c.refresh_from_db()
+        self.assertEqual(t_b.merged_into, t_a)
+        self.assertEqual(t_c.merged_into, t_a)
+
+    def test_departmentless_staff_filtered_qs(self):
+        """2.3: Departmansız personelin sadece kendine atanan talepleri filtreleyebilmesi."""
+        from django.test import RequestFactory
+        from tickets.views.dashboard_views import _get_filtered_tickets_qs
+        from tickets.models import Category
+        cat = Category.objects.first() or Category.objects.create(name="Genel")
+        staff_user = User.objects.create_user(username='dep_less_staff', password='Pass123!', is_staff=True)
+
+        t_mine = Ticket.objects.create(title="Benim Talebim", description="Açıklama", category=cat, created_by=self.user, assigned_to=staff_user)
+        t_other = Ticket.objects.create(title="Başkası", description="Açıklama", category=cat, created_by=self.user)
+
+        factory = RequestFactory()
+        req = factory.get(reverse('export_tickets_csv'))
+        req.user = staff_user
+
+        qs = _get_filtered_tickets_qs(req)
+        self.assertIn(t_mine, qs)
+        self.assertNotIn(t_other, qs)
+
+    def test_ticket_tag_slug_collision(self):
+        """4.2: TicketTag.save() içinde slug çakışması durumunda otomatik artırma."""
+        from tickets.models import TicketTag
+        tag1 = TicketTag.objects.create(name="Donanim Sorunu")
+        tag2 = TicketTag.objects.create(name="Donanim-Sorunu")
+        self.assertEqual(tag1.slug, "donanim-sorunu")
+        self.assertEqual(tag2.slug, "donanim-sorunu-1")
+
+    def test_security_open_redirect_and_2fa_brute_force(self):
+        """Açık yönlendirme (Open Redirect) ve 2FA kaba kuvvet (brute-force) koruması testi."""
+        # 1. Open redirect denemesi (//evil.com) güvenle ticket_list'e yönlenmeli
+        res_login = self.client.post(reverse('login') + '?next=//evil.com', {
+            'username': 'audit2_user',
+            'password': 'UserPass123!'
+        })
+        self.assertRedirects(res_login, reverse('ticket_list'))
+        self.client.logout()
+
+        # 2. 2FA kaba kuvvet testi (5 ardışık hatalı kod oturumu sonlandırmalı)
+        profile = self.user.profile
+        profile.is_2fa_enabled = True
+        profile.totp_secret = "JBSWY3DPEHPK3PXP"
+        profile.save()
+
+        # İlk parola doğrulaması ile 2FA oturumu başlat
+        self.client.post(reverse('login'), {
+            'username': 'audit2_user',
+            'password': 'UserPass123!'
+        })
+
+        session = self.client.session
+        self.assertEqual(session.get('2fa_user_id'), self.user.id)
+
+        # 4 kez hatalı kod gönder (hala 2fa_verify'de kalmalı)
+        for i in range(4):
+            res = self.client.post(reverse('verify_2fa'), {'token': '000000'})
+            self.assertEqual(res.status_code, 200)
+
+        # 5. hatalı kod gönderildiğinde login sayfasına yönlendirilmeli ve session temizlenmeli
+        res_5 = self.client.post(reverse('verify_2fa'), {'token': '000000'})
+        self.assertRedirects(res_5, reverse('login'))
+        self.assertNotIn('2fa_user_id', self.client.session)
 

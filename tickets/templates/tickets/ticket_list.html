@@ -406,7 +406,7 @@
                             <span class="badge bg-light text-muted">Henüz Atanmadı</span>
                             {% endif %}                            
                         </td>
-                        <td>{{ ticket.created_by.username }}</td>
+                        <td>{{ ticket.created_by.username|default:"Silinmiş Kullanıcı" }}</td>
                         <td>{{ ticket.created_at|date:"d.m.Y H:i" }}</td>
                     </tr>
                     {% empty %}
@@ -597,4 +597,22 @@ function prepareBulkSubmit() {
 }
 </script>
 {% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('q');
+    if (searchInput) {
+        let debounceTimer;
+        searchInput.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                if (searchInput.form) {
+                    searchInput.form.submit();
+                }
+            }, 450);
+        });
+    }
+});
+</script>
 {% endblock %}
+

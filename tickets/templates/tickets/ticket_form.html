@@ -489,14 +489,22 @@ Yeni Destek Talebi Oluştur - Destek Sistemi
                             return;
                         }
 
+                        function escapeTag(str) {
+                            if (!str) return '';
+                            const d = document.createElement('div');
+                            d.textContent = str;
+                            return d.innerHTML;
+                        }
+
                         let html = '';
                         data.tags.forEach(t => {
+                            const safeName = escapeTag(t.name);
                             html += `
                                 <tr data-tag-row="${t.id}">
                                     <td>
                                         <div class="d-flex align-items-center gap-1">
-                                            <span class="tag-name-display fw-semibold text-primary" id="tagNameDisplay_${t.id}">#${t.name}</span>
-                                            <input type="text" class="form-control form-control-sm d-none tag-name-input" id="tagNameInput_${t.id}" value="${t.name}" maxlength="20" style="max-width: 170px;">
+                                            <span class="tag-name-display fw-semibold text-primary" id="tagNameDisplay_${t.id}">#${safeName}</span>
+                                            <input type="text" class="form-control form-control-sm d-none tag-name-input" id="tagNameInput_${t.id}" value="${safeName}" maxlength="20" style="max-width: 170px;">
                                         </div>
                                     </td>
                                     <td class="text-center">

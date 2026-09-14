@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#grad)" />
+  <!-- Headset Icon -->
+  <path d="M32 14 C22.06 14 14 22.06 14 32 L14 38 C14 41.31 16.69 44 20 44 L22 44 C23.1 44 24 43.1 24 42 L24 34 C24 32.9 23.1 32 22 32 L18 32 C18 24.27 24.27 18 32 18 C39.73 18 46 24.27 46 32 L42 32 C40.9 32 40 32.9 40 34 L40 42 C40 43.1 40.9 44 42 44 L44 44 C44.5 44 45 43.8 45.4 43.4 C47 41.8 50 37.5 50 32 C50 22.06 41.94 14 32 14 Z" fill="#ffffff" />
+  <path d="M42 42 L42 46 C42 48.21 40.21 50 38 50 L34 50 C32.9 50 32 50.9 32 52 C32 53.1 32.9 54 34 54 L38 54 C42.42 54 46 50.42 46 46 L46 42 Z" fill="#93c5fd" />
+</svg>

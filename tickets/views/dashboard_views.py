@@ -1,48 +1,34 @@
-import os
-import mimetypes
-import json
-import re
-import threading
-import logging
 import csv
-import openpyxl
-from datetime import datetime, date
+import json
+from datetime import datetime
 
-import nh3
-from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse, FileResponse, HttpResponseForbidden, Http404, HttpResponse
+from django.shortcuts import render, redirect, get_object_or_404
+from django.http import HttpResponse, HttpResponseForbidden, FileResponse
 from django.contrib.auth.models import User
-from django.contrib.auth import login, logout, authenticate, update_session_auth_hash
-from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm
 from django.contrib.auth.decorators import login_required
-from django.views.decorators.http import require_POST
-from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
-from django.db import transaction
-from django.db.models import Q, Count, Avg, F
-from django.core.paginator import Paginator
-from django.core.mail import send_mail
-from django.core.cache import cache
+from django.db.models import Q, Count, Avg, F, ExpressionWrapper, DurationField
 from django.utils import timezone
-from django.utils.text import slugify
 
-from ..models import (
-    Ticket, TicketComment, Category, EmailVerification, TicketActivityLog,
-    Notification, ChatGroup, ChatMessage, UserChatPreference, UserProfile, KnowledgeBaseArticle,
-    TicketRating, CannedResponse, TicketTag
-)
-from ..forms import TicketForm, CommentForm, UserRegisterForm, UserProfileForm
-from ..totp import (
-    generate_totp_secret, get_totp_token, verify_totp_token,
-    get_totp_uri, generate_qr_code_data_uri
-)
+from ..models import Ticket, TicketRating
 from ..pdf import generate_ticket_pdf
-from ..webhooks import send_outgoing_webhook
-from ..copilot import suggest_category_and_priority, generate_ticket_summary
-from ..consumers import ALLOWED_TAGS, ALLOWED_ATTRIBUTES
-from .common import send_notification_email, _async_email_worker
 
-logger = logging.getLogger(__name__)
+
+def _safe_get_ticket_creator_username(ticket, default="Silinmiş Kullanıcı"):
+    """Bilet sahibinin adını RelatedObjectDoesNotExist istisnasına karşı güvenli bir şekilde döndürür."""
+    try:
+        return ticket.created_by.username if ticket.created_by else default
+    except (User.DoesNotExist, AttributeError, Exception):
+        return default
+
+
+def _safe_get_ticket_assignee_username(ticket, default="Atanmadı"):
+    """Atanan yetkilinin adını güvenli bir şekilde döndürür."""
+    try:
+        return ticket.assigned_to.username if ticket.assigned_to else default
+    except (User.DoesNotExist, AttributeError, Exception):
+        return default
+
 
 
 @login_required
@@ -81,7 +67,6 @@ def admin_dashboard_view(request):
         open_tickets=Count('id', filter=Q(status='open')),
         in_progress_tickets=Count('id', filter=Q(status='in_progress')),
         resolved_tickets=Count('id', filter=Q(status='resolved')),
-        urgent_tickets=Count('id', filter=Q(priority='urgent')),
         priority_low=Count('id', filter=Q(priority='low')),
         priority_medium=Count('id', filter=Q(priority='medium')),
         priority_high=Count('id', filter=Q(priority='high')),
@@ -95,7 +80,7 @@ def admin_dashboard_view(request):
     open_tickets = metrics['open_tickets']
     in_progress_tickets = metrics['in_progress_tickets']
     resolved_tickets = metrics['resolved_tickets']
-    urgent_tickets = metrics['urgent_tickets']
+    urgent_tickets = metrics['priority_urgent']
     resolved_this_month = metrics['resolved_this_month']
     created_this_month = metrics['created_this_month']
     sla_breached_count = metrics['sla_breached_count']
@@ -119,6 +104,30 @@ def admin_dashboard_view(request):
     csat_avg = round(csat_stats['avg'], 1) if csat_stats['avg'] else 0.0
     satisfied_count = csat_stats['satisfied']
     satisfaction_rate = round((satisfied_count / csat_count) * 100, 1) if csat_count > 0 else 0
+
+    # 3.b MTTR (Mean Time to Resolve / Ortalama Çözüm Süresi) Hesabı
+    resolved_tickets_qs = base_qs.filter(status='resolved')
+    mttr_stat = resolved_tickets_qs.annotate(
+        resolution_time=ExpressionWrapper(F('updated_at') - F('created_at'), output_field=DurationField())
+    ).aggregate(avg_res=Avg('resolution_time'))
+
+    avg_res = mttr_stat['avg_res']
+    if avg_res:
+        total_seconds = max(0, int(avg_res.total_seconds()))
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        if hours >= 24:
+            days = hours // 24
+            rem_hours = hours % 24
+            mttr_display = f"{days}g {rem_hours}s"
+        elif hours > 0:
+            mttr_display = f"{hours}s {minutes}dk"
+        else:
+            mttr_display = f"{minutes} dk"
+        mttr_hours = round(total_seconds / 3600, 1)
+    else:
+        mttr_display = "-"
+        mttr_hours = 0
 
     # 4. Kategori Dağılımı Verileri (Chart.js İçin)
     # Kapsamdaki taleplerin kategorilerine göre dağılımı (Süper admin tüm sistem, diğer adminler kendi talepleri)
@@ -230,6 +239,8 @@ def admin_dashboard_view(request):
         'csat_count': csat_count,
         'csat_avg': csat_avg,
         'satisfaction_rate': satisfaction_rate,
+        'mttr_display': mttr_display,
+        'mttr_hours': mttr_hours,
         'csat_ratings': csat_ratings,
         'staff_users': staff_users,
         'csat_assigned': csat_assigned,
@@ -265,7 +276,7 @@ def _get_filtered_tickets_qs(request):
             Q(category__in=allowed_cats) | Q(assigned_to=request.user)
         ).distinct()
     else:
-        base_qs = Ticket.objects.all()
+        base_qs = Ticket.objects.filter(assigned_to=request.user)
 
     q = request.GET.get('q', '').strip()
     status = request.GET.get('status', '').strip()
@@ -299,7 +310,7 @@ def _get_filtered_tickets_qs(request):
     if mine:
         tickets = tickets.filter(created_by=request.user)
 
-    return tickets.select_related('created_by', 'category', 'assigned_to').prefetch_related('comments', 'tags').order_by('-created_at')
+    return tickets.select_related('created_by', 'category', 'assigned_to').prefetch_related('comments', 'tags').annotate(comment_count=Count('comments', distinct=True)).order_by('-created_at')
 
 
 
@@ -337,14 +348,14 @@ def export_tickets_csv(request):
             tags_str,
             t.get_priority_display(),
             t.get_status_display(),
-            t.created_by.username,
-            t.assigned_to.username if t.assigned_to else "Atanmadı",
+            _safe_get_ticket_creator_username(t),
+            _safe_get_ticket_assignee_username(t),
             "Herkese Açık" if t.is_public else "Özel / Gizli",
             t.created_at.strftime('%d.%m.%Y %H:%M') if t.created_at else "",
             t.updated_at.strftime('%d.%m.%Y %H:%M') if t.updated_at else "",
             t.first_response_at.strftime('%d.%m.%Y %H:%M') if t.first_response_at else "Henüz Yanıtlanmadı",
             sla_text,
-            t.comments.count()
+            getattr(t, 'comment_count', t.comments.count())
         ])
 
     return response
@@ -408,14 +419,14 @@ def export_tickets_excel(request):
             tags_str,
             t.get_priority_display(),
             t.get_status_display(),
-            t.created_by.username,
-            t.assigned_to.username if t.assigned_to else "Atanmadı",
+            _safe_get_ticket_creator_username(t),
+            _safe_get_ticket_assignee_username(t),
             "Herkese Açık" if t.is_public else "Özel / Gizli",
             t.created_at.strftime('%d.%m.%Y %H:%M') if t.created_at else "",
             t.updated_at.strftime('%d.%m.%Y %H:%M') if t.updated_at else "",
             t.first_response_at.strftime('%d.%m.%Y %H:%M') if t.first_response_at else "Henüz Yanıtlanmadı",
             sla_text,
-            t.comments.count()
+            getattr(t, 'comment_count', t.comments.count())
         ]
         ws.append(row)
 
@@ -430,9 +441,6 @@ def export_tickets_excel(request):
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     wb.save(response)
     return response
-
-
-# --- TOPLU İŞLEMLER (BULK ACTIONS) ---
 
 
 
@@ -458,10 +466,5 @@ def export_ticket_pdf(request, pk):
     pdf_buffer = generate_ticket_pdf(ticket)
     filename = f"talep_{ticket.ticket_number}_{timezone.now().strftime('%Y%m%d')}.pdf"
     return FileResponse(pdf_buffer, as_attachment=True, filename=filename, content_type='application/pdf')
-
-
-# ==========================================
-# YAPAY ZEKÂ TALEP ASİSTANI (AI COPILOT) API
-# ==========================================
 
 

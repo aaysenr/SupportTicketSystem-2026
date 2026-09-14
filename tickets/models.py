@@ -63,7 +63,13 @@ class TicketTag(models.Model):
     def save(self, *args, **kwargs):
         if not self.slug:
             from django.utils.text import slugify
-            self.slug = slugify(self.name)
+            base_slug = slugify(self.name) or 'etiket'
+            slug = base_slug
+            counter = 1
+            while TicketTag.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
         super().save(*args, **kwargs)
 
 
@@ -89,7 +95,7 @@ def is_holiday_or_weekend(dt):
     if (dt.month, dt.day) in fixed_holidays:
         return True
 
-    # 3. Dini Bayram Tatil Takvimi (2025 - 2028 Ramazan & Kurban Bayramları)
+    # 3. Dini Bayram Tatil Takvimi (2025 - 2035 Ramazan & Kurban Bayramları)
     religious_holidays = {
         # 2025
         (2025, 3, 30), (2025, 3, 31), (2025, 4, 1),
@@ -103,6 +109,28 @@ def is_holiday_or_weekend(dt):
         # 2028
         (2028, 2, 27), (2028, 2, 28), (2028, 2, 29),
         (2028, 5, 5), (2028, 5, 6), (2028, 5, 7), (2028, 5, 8),
+        # 2029
+        (2029, 2, 15), (2029, 2, 16), (2029, 2, 17),
+        (2029, 4, 24), (2029, 4, 25), (2029, 4, 26), (2029, 4, 27),
+        # 2030
+        (2030, 2, 5), (2030, 2, 6), (2030, 2, 7),
+        (2030, 4, 14), (2030, 4, 15), (2030, 4, 16), (2030, 4, 17),
+        # 2031
+        (2031, 1, 25), (2031, 1, 26), (2031, 1, 27),
+        (2031, 4, 3), (2031, 4, 4), (2031, 4, 5), (2031, 4, 6),
+        # 2032
+        (2032, 1, 14), (2032, 1, 15), (2032, 1, 16),
+        (2032, 3, 22), (2032, 3, 23), (2032, 3, 24), (2032, 3, 25),
+        # 2033
+        (2033, 1, 2), (2033, 1, 3), (2033, 1, 4),
+        (2033, 3, 11), (2033, 3, 12), (2033, 3, 13), (2033, 3, 14),
+        (2033, 12, 23), (2033, 12, 24), (2033, 12, 25),
+        # 2034
+        (2034, 2, 28), (2034, 3, 1), (2034, 3, 2), (2034, 3, 3),
+        (2034, 12, 12), (2034, 12, 13), (2034, 12, 14),
+        # 2035
+        (2035, 2, 18), (2035, 2, 19), (2035, 2, 20), (2035, 2, 21),
+        (2035, 12, 2), (2035, 12, 3), (2035, 12, 4),
     }
     if (dt.year, dt.month, dt.day) in religious_holidays:
         return True
@@ -349,7 +377,13 @@ class TicketComment(models.Model):
     """Destek talepleri altındaki yanıt ve yorumlar modeli."""
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='comments', verbose_name="Destek Talebi")
-    author = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="Yazan Kullanıcı")
+    author = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Yazan Kullanıcı"
+    )
     content = models.TextField(verbose_name="Yorum / Cevap")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="Tarih")
     is_internal = models.BooleanField(default=False, verbose_name="İç Not (Sadece Yöneticiler Görsün)")
@@ -381,7 +415,8 @@ class TicketComment(models.Model):
         ordering = ['created_at']
 
     def __str__(self):
-        return f"{self.author.username} - {self.ticket.title}"
+        author_name = self.author.username if self.author else "Silinmiş Kullanıcı"
+        return f"{author_name} - {self.ticket.title}"
 
 
 
@@ -656,7 +691,13 @@ class TicketRating(models.Model):
     )
 
     ticket = models.OneToOneField(Ticket, on_delete=models.CASCADE, related_name='rating', verbose_name="Destek Talebi")
-    user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="Değerlendiren Kullanıcı")
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Değerlendiren Kullanıcı"
+    )
     score = models.PositiveSmallIntegerField(choices=SCORE_CHOICES, verbose_name="Memnuniyet Puanı")
     feedback = models.TextField(blank=True, null=True, verbose_name="Görüş ve Öneriler")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Değerlendirme Tarihi")
@@ -685,7 +726,9 @@ class CannedResponse(models.Model):
     )
     created_by = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='canned_responses',
         verbose_name="Oluşturan"
     )

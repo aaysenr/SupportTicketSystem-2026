@@ -12,12 +12,18 @@
                 </h4>
                 {% if notifications %}
                 <div class="d-flex align-items-center gap-2">
-                    <a href="{% url 'mark_all_notifications_read' %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-semibold">
-                        <i class="bi bi-check2-all me-1"></i> Tümünü Okundu İşaretle
-                    </a>
-                    <a href="{% url 'delete_all_notifications' %}" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-semibold" onclick="return confirm('Tüm bildirimlerinizi silmek istediğinizden emin misiniz?');">
-                        <i class="bi bi-trash3 me-1"></i> Tümünü Sil
-                    </a>
+                    <form method="POST" action="{% url 'mark_all_notifications_read' %}" class="d-inline m-0">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-semibold">
+                            <i class="bi bi-check2-all me-1"></i> Tümünü Okundu İşaretle
+                        </button>
+                    </form>
+                    <form method="POST" action="{% url 'delete_all_notifications' %}" class="d-inline m-0" onsubmit="return confirm('Tüm bildirimlerinizi silmek istediğinizden emin misiniz?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-semibold">
+                            <i class="bi bi-trash3 me-1"></i> Tümünü Sil
+                        </button>
+                    </form>
                 </div>
                 {% endif %}
             </div>
@@ -35,9 +41,12 @@
                             </span>
                             <small class="text-muted ms-md-3 mt-1 mt-md-0 text-nowrap">{{ notif.created_at|date:"d.m.Y H:i" }}</small>
                         </a>
-                        <a href="{% url 'delete_notification' notif.id %}" class="btn btn-sm btn-light text-danger rounded-circle p-1 px-2 border-0 opacity-75 hover-opacity-100" title="Bildirimi Sil" onclick="return confirm('Bu bildirimi silmek istiyor musunuz?');">
-                            <i class="bi bi-trash3"></i>
-                        </a>
+                        <form method="POST" action="{% url 'delete_notification' notif.id %}" class="d-inline m-0" onsubmit="return confirm('Bu bildirimi silmek istiyor musunuz?');">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-light text-danger rounded-circle p-1 px-2 border-0 opacity-75 hover-opacity-100" title="Bildirimi Sil">
+                                <i class="bi bi-trash3"></i>
+                            </button>
+                        </form>
                     </div>
                     {% endfor %}
                 </div>

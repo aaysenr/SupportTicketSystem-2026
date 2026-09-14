@@ -466,22 +466,30 @@
 
             <!-- Yorum Başlığı (Kullanıcı & Tarih) -->
             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                <div class="d-flex align-items-center gap-2">
-                    {% if comment.author.profile.avatar_url %}
-                        <img src="{{ comment.author.profile.avatar_url }}" alt="{{ comment.author.username }}" class="rounded-circle border border-primary-subtle shadow-sm" style="width: 30px; height: 30px; object-fit: cover;">
+                    {% if comment.author %}
+                        {% if comment.author.profile.avatar_url %}
+                            <img src="{{ comment.author.profile.avatar_url }}" alt="{{ comment.author.username }}" class="rounded-circle border border-primary-subtle shadow-sm" style="width: 30px; height: 30px; object-fit: cover;">
+                        {% else %}
+                            <div class="rounded-circle bg-primary-subtle text-primary border border-primary-subtle d-flex align-items-center justify-content-center fw-bold small" style="width: 30px; height: 30px; font-size: 0.75rem;">
+                                {{ comment.author.username|slice:":2"|upper }}
+                            </div>
+                        {% endif %}
+                        <strong class="text-body">
+                            {{ comment.author.username }}
+                        </strong>
+                        {% if comment.author.is_staff %}
+                        <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle rounded-pill small">Yetkili</span>
+                        {% endif %}
+                        {% if comment.author == ticket.created_by %}
+                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle rounded-pill small">Talep Sahibi</span>
+                        {% endif %}
                     {% else %}
-                        <div class="rounded-circle bg-primary-subtle text-primary border border-primary-subtle d-flex align-items-center justify-content-center fw-bold small" style="width: 30px; height: 30px; font-size: 0.75rem;">
-                            {{ comment.author.username|slice:":2"|upper }}
+                        <div class="rounded-circle bg-secondary-subtle text-secondary border border-secondary-subtle d-flex align-items-center justify-content-center fw-bold small" style="width: 30px; height: 30px; font-size: 0.75rem;">
+                            ?
                         </div>
-                    {% endif %}
-                    <strong class="text-body">
-                        {{ comment.author.username }}
-                    </strong>
-                    {% if comment.author.is_staff %}
-                    <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle rounded-pill small">Yetkili</span>
-                    {% endif %}
-                    {% if comment.author == ticket.created_by %}
-                    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle rounded-pill small">Talep Sahibi</span>
+                        <strong class="text-body text-secondary fst-italic">
+                            Silinmiş Kullanıcı
+                        </strong>
                     {% endif %}
                     {% if comment.is_internal %}
                     <span class="badge bg-warning text-dark rounded-pill ms-1"><i class="bi bi-lock-fill me-1"></i>Gizli İç Not</span>
@@ -620,6 +628,25 @@
     </div>
 </div>
 
+{% if ticket.merged_into %}
+<!-- BİRLEŞTİRİLMİŞ TALEP YORUM KİLİDİ KARTI -->
+<div class="card shadow-sm mb-4 border-0 rounded-3 border-start border-4 border-info">
+    <div class="card-body p-4 text-center">
+        <div class="mb-3">
+            <span class="d-inline-flex align-items-center justify-content-center bg-info-subtle text-info rounded-circle" style="width: 54px; height: 54px;">
+                <i class="bi bi-link-45deg fs-2"></i>
+            </span>
+        </div>
+        <h5 class="fw-bold text-body">Bu Talep Başka Bir Taleple Birleştirilmiştir</h5>
+        <p class="text-secondary mb-3 mx-auto" style="max-width: 600px;">
+            Bu destek talebi <strong>#{{ ticket.merged_into.ticket_number }}</strong> (<em>{{ ticket.merged_into.title|truncatechars:50 }}</em>) ana talebi ile birleştirildiğinden yeni yanıtlara kapatılmıştır. Yanıtınızı veya ek bilgi talebinizi ana bilet üzerinden iletebilirsiniz.
+        </p>
+        <a href="{% url 'ticket_detail' ticket.merged_into.id %}" class="btn btn-primary rounded-pill px-4 shadow-sm">
+            <i class="bi bi-arrow-right-circle me-1"></i>Ana Talebe Git (#{{ ticket.merged_into.ticket_number }})
+        </a>
+    </div>
+</div>
+{% else %}
 <!-- Yeni Yorum Ekleme Kartı -->
 <div class="card shadow-sm mb-4 border-0 rounded-3">
     <div class="card-header bg-body py-3 px-4 border-bottom">
@@ -676,7 +703,11 @@
                 <label for="{{ comment_form.attachment.id_for_label }}" class="form-label fw-bold text-body">
                     {{ comment_form.attachment.label }}
                 </label>
-                {{ comment_form.attachment }}
+                <div class="p-3 border border-2 border-dashed rounded-3 text-center bg-body-tertiary position-relative drop-zone-container" style="border-style: dashed !important; border-color: var(--bs-border-color) !important;">
+                    <i class="bi bi-cloud-arrow-up fs-2 text-primary d-block mb-1"></i>
+                    <span class="small text-body fw-semibold d-block mb-2" id="attachment-label-text">Dosyayı buraya sürükleyin veya seçmek için tıklayın</span>
+                    {{ comment_form.attachment }}
+                </div>
                 {% if comment_form.attachment.errors %}
                 <div class="text-danger small mt-1">{{ comment_form.attachment.errors }}</div>
                 {% endif %}
@@ -705,6 +736,46 @@
         </form>
     </div>
 </div>
+{% endif %}
+
+<!-- TALEP HAREKET VE DENETİM GEÇMİŞİ (VISUAL TIMELINE) -->
+<div class="card shadow-sm border-0 rounded-3 mb-4">
+    <div class="card-header bg-body py-3 px-4 d-flex justify-content-between align-items-center border-bottom">
+        <h5 class="mb-0 fw-bold text-body fs-6">
+            <i class="bi bi-clock-history me-2 text-primary"></i>Talep Hareket Geçmişi (Denetim İzi)
+        </h5>
+        <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-3">{{ activity_logs.count }} Hareket</span>
+    </div>
+    <div class="card-body p-4">
+        {% if activity_logs %}
+        <div class="position-relative ps-4" style="border-left: 2px solid var(--bs-border-color, #e2e8f0); margin-left: 0.75rem;">
+            {% for log in activity_logs %}
+            <div class="position-relative mb-3 pb-2">
+                <div class="position-absolute" style="left: -1.82rem; top: 0.2rem; width: 14px; height: 14px; border-radius: 50%; background-color: var(--bs-primary, #2563eb); border: 2px solid var(--bs-body-bg, #fff);"></div>
+                <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2">
+                    <span class="fw-semibold text-body small">
+                        {% if log.actor %}
+                            <i class="bi bi-person-fill text-primary me-1"></i>{{ log.actor.get_full_name|default:log.actor.username }}
+                        {% else %}
+                            <i class="bi bi-gear-fill text-muted me-1"></i>Sistem Otomasyonu
+                        {% endif %}
+                    </span>
+                    <small class="text-body-secondary font-monospace" style="font-size: 0.8rem;">
+                        <i class="bi bi-clock me-1"></i>{{ log.created_at|date:"d.m.Y H:i:s" }}
+                    </small>
+                </div>
+                <div class="text-body-secondary small mt-1 p-2 bg-body-tertiary rounded-2 border">
+                    {{ log.action }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0"><i class="bi bi-info-circle me-1"></i>Henüz kaydedilmiş bir hareket bulunmuyor.</p>
+        {% endif %}
+    </div>
+</div>
+
 
 <!-- YORUM DÜZENLEME MODALI -->
 <div class="modal fade" id="editCommentModal" tabindex="-1" aria-labelledby="editCommentModalLabel" aria-hidden="true">
@@ -837,6 +908,14 @@ document.addEventListener('DOMContentLoaded', function () {
     tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
+
+    // HTML Kaçış Yardımcısı (XSS Önleme)
+    function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
 
     // 1. AJAX Beğeni (Like) İşlemleri
     document.querySelectorAll('.btn-like-ajax').forEach(function (button) {
@@ -1074,7 +1153,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const contentTextarea = document.querySelector('textarea[name="content"]') || document.getElementById('id_content');
 
     if (insertCannedBtn && cannedSelect && contentTextarea) {
-        insertCannedBtn.addEventListener('click', function () {
+        function insertCannedText() {
             const selectedOpt = cannedSelect.options[cannedSelect.selectedIndex];
             if (selectedOpt && selectedOpt.value) {
                 const text = selectedOpt.getAttribute('data-content') || '';
@@ -1085,7 +1164,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
                 contentTextarea.focus();
             }
-        });
+        }
+        insertCannedBtn.addEventListener('click', insertCannedText);
+        cannedSelect.addEventListener('change', insertCannedText);
     }
 
     // 4. Canlı Talep İçi Mesajlaşma & Yazıyor... (Live Ticket WebSocket)
@@ -1097,12 +1178,29 @@ document.addEventListener('DOMContentLoaded', function () {
     let ticketSocket = null;
     let typingTimer = null;
     let reconnectTimeout = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 10;
+
+    function scheduleTicketReconnect() {
+        if (reconnectTimeout) return;
+        if (reconnectAttempts >= maxReconnectAttempts) {
+            console.warn('Canlı bilet bağlantısı maksimum deneme sınırına ulaştı.');
+            return;
+        }
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 15000);
+        reconnectTimeout = setTimeout(function () {
+            reconnectTimeout = null;
+            initTicketWebSocket();
+        }, delay);
+    }
 
     function initTicketWebSocket() {
         try {
             ticketSocket = new WebSocket(ticketWsUrl);
 
             ticketSocket.onopen = function () {
+                reconnectAttempts = 0;
                 if (reconnectTimeout) {
                     clearTimeout(reconnectTimeout);
                     reconnectTimeout = null;
@@ -1163,14 +1261,14 @@ document.addEventListener('DOMContentLoaded', function () {
                             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                                 <div class="d-flex align-items-center gap-2">
                                     <strong class="text-body">
-                                        <i class="bi bi-person-circle me-1 text-primary"></i>${data.author_name}
+                                        <i class="bi bi-person-circle me-1 text-primary"></i>${escapeHtml(data.author_name)}
                                     </strong>
                                     ${badgesHtml}
                                 </div>
-                                <small class="text-body-secondary"><i class="bi bi-clock me-1"></i>${data.created_at}</small>
+                                <small class="text-body-secondary"><i class="bi bi-clock me-1"></i>${escapeHtml(data.created_at)}</small>
                             </div>
                             <div class="comment-content text-body mb-2" style="font-size: 0.95rem; line-height: 1.6; white-space: pre-line;">
-                                ${data.content}
+                                ${escapeHtml(data.content)}
                             </div>
                             ${attachmentHtml}
                         `;
@@ -1216,31 +1314,15 @@ document.addEventListener('DOMContentLoaded', function () {
             };
 
             ticketSocket.onclose = function () {
-                // Bağlantı koptuğunda 3 saniye sonra otomatik yeniden bağlan
-                if (!reconnectTimeout) {
-                    reconnectTimeout = setTimeout(function () {
-                        reconnectTimeout = null;
-                        initTicketWebSocket();
-                    }, 3000);
-                }
+                scheduleTicketReconnect();
             };
 
             ticketSocket.onerror = function () {
-                if (!reconnectTimeout) {
-                    reconnectTimeout = setTimeout(function () {
-                        reconnectTimeout = null;
-                        initTicketWebSocket();
-                    }, 3000);
-                }
+                scheduleTicketReconnect();
             };
         } catch (e) {
-            console.warn('Talep WebSocket başlatılamadı, 3 sn sonra tekrar denenecek:', e);
-            if (!reconnectTimeout) {
-                reconnectTimeout = setTimeout(function () {
-                    reconnectTimeout = null;
-                    initTicketWebSocket();
-                }, 3000);
-            }
+            console.warn('Talep WebSocket başlatılamadı, yeniden denenecek:', e);
+            scheduleTicketReconnect();
         }
     }
 
@@ -1364,7 +1446,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (editModal) editModal.hide();
                     const contentContainer = document.getElementById('comment-text-' + data.comment_id);
                     if (contentContainer) {
-                        contentContainer.innerHTML = data.content.replace(/\n/g, '<br>');
+                        contentContainer.innerHTML = escapeHtml(data.content).replace(/\n/g, '<br>');
                     }
                     const editBtn = document.querySelector(`.btn-edit-comment[data-comment-id="${data.comment_id}"]`);
                     if (editBtn) editBtn.setAttribute('data-comment-raw', data.content);

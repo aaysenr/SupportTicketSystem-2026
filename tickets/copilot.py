@@ -100,12 +100,17 @@ def generate_ticket_summary(ticket):
     Destek personelinin bilet detayında zaman kazanması için
     talebı ve mevcut çözüm durumunu 1 cümlelik özet haline getirir.
     """
-    creator = ticket.created_by.username
+    try:
+        creator_user = ticket.created_by
+    except Exception:
+        creator_user = None
+
+    creator = (creator_user.get_full_name() or creator_user.username) if creator_user else "Bilinmeyen Kullanıcı"
     cat = ticket.category.name if ticket.category else "Genel"
     clean_desc = " ".join(ticket.description.split()[:20])
 
-    has_solution = ticket.comments.filter(is_solution=True).exists()
-    comment_count = ticket.comments.filter(is_internal=False).count()
+    has_solution = ticket.comments.filter(is_solution=True).exists() if ticket.pk else False
+    comment_count = ticket.comments.filter(is_internal=False).count() if ticket.pk else 0
 
     if ticket.status == 'resolved' or has_solution:
         status_note = "onaylanmış bir çözüm ile başarıyla neticelendirilmiştir."

@@ -6,7 +6,7 @@ def notifications_context(request):
     """
     if request.user.is_authenticated:
         unread_notifications = Notification.objects.filter(recipient=request.user, is_read=False)
-        recent_notifications = Notification.objects.filter(recipient=request.user)[:5]
+        recent_notifications = Notification.objects.filter(recipient=request.user).select_related('actor', 'ticket')[:5]
         return {
             'unread_notifications_count': unread_notifications.count(),
             'recent_notifications': recent_notifications
