@@ -228,7 +228,7 @@ Tarayıcınızdan **`http://127.0.0.1:8000/`** adresine giderek uygulamayı test
 
 ---
 
-## 🧭 Staj Sorumlusu İçin 5 Dakikalık Test Turu
+## 🧭5 Dakikalık Test Turu
 
 Projeyi test ederken şu akışı izleyerek tüm modülleri deneyimleyebilirsiniz:
 
