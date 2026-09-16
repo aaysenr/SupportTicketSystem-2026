@@ -54,7 +54,8 @@ def suggest_category_and_priority(title, description, available_categories=None)
     category_patterns = {
         'finans': ['fatura', 'ödeme', 'iade', 'kredi kartı', 'kart', 'tahsilat', 'dekont', 'iban', 'borç', 'abonelik', 'ücret'],
         'güvenlik': ['şifre', 'parola', '2fa', 'doğrulama', 'hesap', 'oturum', 'yetki', 'bloke', 'sms', 'kod gelmiyor'],
-        'donanım': ['yazıcı', 'bilgisayar', 'monitör', 'klavye', 'fare', 'cihaz', 'kablo', 'wifi', 'modem', 'ip', 'tarayıcı donanım'],
+        'donanım': ['yazıcı', 'bilgisayar', 'monitör', 'klavye', 'fare', 'cihaz', 'kablo', 'tarayıcı donanım'],
+        'ağ': ['vpn', 'ağ', 'internet', 'bağlantı', 'wifi', 'modem', 'ip', 'dns', 'erişim', 'fortinet'],
         'yazılım': ['hata', 'bug', 'kod', 'sunucu', 'veritabanı', 'api', 'entegrasyon', '500', '404', 'sayfa açılmıyor', 'yüklenmiyor']
     }
 

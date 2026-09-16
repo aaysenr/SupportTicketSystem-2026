@@ -98,12 +98,15 @@ def kb_suggest_api(request):
 
     suggestions = []
 
-    # 1. Bilgi Bankası Makaleleri
+    # 1. Bilgi Bankası Makaleleri (Kelime Bazlı Arama)
+    words = [w for w in q.replace(',', ' ').replace('.', ' ').split() if len(w) >= 3]
+    kb_filter = Q(title__icontains=q) | Q(keywords__icontains=q) | Q(content__icontains=q)
+    for w in words:
+        kb_filter |= Q(title__icontains=w) | Q(keywords__icontains=w)
+
     kb_qs = KnowledgeBaseArticle.objects.filter(
         is_published=True
-    ).select_related('category').filter(
-        Q(title__icontains=q) | Q(keywords__icontains=q) | Q(content__icontains=q)
-    )[:4]
+    ).select_related('category').filter(kb_filter).distinct()[:4]
 
     for item in kb_qs:
         suggestions.append({
