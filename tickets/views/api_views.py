@@ -346,7 +346,7 @@ def create_tag_api(request):
 
     raw_name = data.get('name', '').strip()
     name = re.sub(r'[^\w\s-]', '', raw_name).strip()[:20]
-    color = '#3B82F6'  # Etiket rengi daima standart mavi
+    color = '#2563eb'  # Etiket rengi daima standart mavi
 
     if not name:
         return JsonResponse({'status': 'error', 'message': 'Geçerli bir etiket adı giriniz.'}, status=400)
@@ -359,7 +359,7 @@ def create_tag_api(request):
             'tag': {
                 'id': existing.id,
                 'name': existing.name,
-                'color': '#3B82F6',
+                'color': existing.color or '#2563eb',
                 'slug': existing.slug
             }
         })
@@ -371,7 +371,7 @@ def create_tag_api(request):
         slug = f"{base_slug}-{counter}"
         counter += 1
 
-    tag = TicketTag.objects.create(name=name, slug=slug, color='#3B82F6')
+    tag = TicketTag.objects.create(name=name, slug=slug, color='#2563eb')
     return JsonResponse({
         'status': 'success',
         'tag': {

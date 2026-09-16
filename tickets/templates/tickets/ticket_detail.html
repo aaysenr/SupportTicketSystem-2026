@@ -466,6 +466,7 @@
 
             <!-- Yorum Başlığı (Kullanıcı & Tarih) -->
             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
                     {% if comment.author %}
                         {% if comment.author.profile.avatar_url %}
                             <img src="{{ comment.author.profile.avatar_url }}" alt="{{ comment.author.username }}" class="rounded-circle border border-primary-subtle shadow-sm" style="width: 30px; height: 30px; object-fit: cover;">

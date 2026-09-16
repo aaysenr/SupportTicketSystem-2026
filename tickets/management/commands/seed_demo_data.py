@@ -83,11 +83,11 @@ class Command(BaseCommand):
 
         # 4. Etiketler (Tags)
         tag_yazilim, _ = TicketTag.objects.get_or_create(name='yazılım', defaults={'color': '#2563eb'})
-        tag_donanim, _ = TicketTag.objects.get_or_create(name='donanım', defaults={'color': '#dc2626'})
-        tag_acil, _ = TicketTag.objects.get_or_create(name='acil', defaults={'color': '#ef4444'})
-        tag_vpn, _ = TicketTag.objects.get_or_create(name='vpn', defaults={'color': '#16a34a'})
-        tag_fatura, _ = TicketTag.objects.get_or_create(name='fatura', defaults={'color': '#d97706'})
-        tag_lisans, _ = TicketTag.objects.get_or_create(name='lisans', defaults={'color': '#9333ea'})
+        tag_donanim, _ = TicketTag.objects.get_or_create(name='donanım', defaults={'color': '#2563eb'})
+        tag_acil, _ = TicketTag.objects.get_or_create(name='acil', defaults={'color': '#2563eb'})
+        tag_vpn, _ = TicketTag.objects.get_or_create(name='vpn', defaults={'color': '#2563eb'})
+        tag_fatura, _ = TicketTag.objects.get_or_create(name='fatura', defaults={'color': '#2563eb'})
+        tag_lisans, _ = TicketTag.objects.get_or_create(name='lisans', defaults={'color': '#2563eb'})
 
         # 5. Standart ve Anlaşılır Kullanıcı Hesapları
         # A) Süper Yönetici (Admin)
