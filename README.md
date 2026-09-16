@@ -49,7 +49,7 @@ Bu proje staj teslimi amacıyla hazırlanmış olup, staj sorumlusunun sistemi f
 - **12-Factor Ortam Değişkeni Desteği:** `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, Redis ve SMTP bilgileri `python-dotenv` aracılığıyla `.env` dosyasından okunur.
 
 ### 2. ⚡ Gerçek Zamanlı İletişim & Ekip Sohbeti (WebSocket & Django Channels)
-- **Canlı Destek Talebi Mesajlaşması (Live Ticket Chat):** Destek talebinin detay sayfası Channels WebSocket (`TicketConsumer`) ile bağlanmıştır; müşteriler ve destek ekibi sayfayı yenilemeden anlık mesajlaşır.
+- **Canlı Destek Talebi Mesajlaşması (Live Ticket Chat):** Destek talebinin detay sayfası Channels WebSocket (`TicketCommentConsumer`) ile bağlanmıştır; müşteriler ve destek ekibi sayfayı yenilemeden anlık mesajlaşır.
 - **WhatsApp Tarzı Mesajlaşma & Zaman Damgaları:**
   - Mesaj saatleri (örn: `14:35`) ve düzenlenmiş mesajlarda `(düzenlendi)` etiketi gösterilir.
   - Zaman damgasının üzerine gelindiğinde gönderilme ve son düzenlenme tarih/saat bilgisi detaylı tooltip olarak sunulur.
