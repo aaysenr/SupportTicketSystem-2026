@@ -46,7 +46,7 @@ Bu proje staj teslimi amacıyla hazırlanmış olup, staj sorumlusunun sistemi f
 - **Korumalı Dosya İndirme & Dizin Aşımı Engeli:** Yüklenen ekler (`attachments`) doğrudan statik URL üzerinden halka açılmaz. Korumalı görünümler üzerinden sadece biletin sahibi, departman yetkilisi veya süper yönetici tarafından indirilebilir.
 - **Kriptografik OTP ve E-Posta Doğrulama:** 6 haneli hesap onay kodları `secrets` modülüyle üretilir; 10 dakika geçerlilik ve kaba kuvvet saldırılarına karşı **5 hatalı deneme sınırı** ile korunur.
 - **Gizli Yönetim Paneli ve Özel Hata Ara Katmanı:** Django admin paneli `/super-admin/` yolunda izole edilmiştir. `CustomErrorPageMiddleware` sayesinde `DEBUG=True` iken dahi sarı teknik rota listesi ekrana basılmaz; kullanıcı her zaman özel ve kurumsal `404.html`, `403.html` ve `500.html` sayfalarıyla karşılanır.
-- **12-Factor Ortam Değişkeni Desteği:** `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, Redis ve SMTP bilgileri `python-dotenv` aracılığıyla `.env` dosyasından okunur.
+- **12-Factor Ortam Değişkeni Desteği:** `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `SECURE_SSL_REDIRECT`, `SESSION_COOKIE_AGE`, `REDIS_URL` ve SMTP bilgileri `python-dotenv` aracılığıyla `.env` dosyasından okunur.
 
 ### 2. ⚡ Gerçek Zamanlı İletişim & Ekip Sohbeti (WebSocket & Django Channels)
 - **Canlı Destek Talebi Mesajlaşması (Live Ticket Chat):** Destek talebinin detay sayfası Channels WebSocket (`TicketCommentConsumer`) ile bağlanmıştır; müşteriler ve destek ekibi sayfayı yenilemeden anlık mesajlaşır.
@@ -123,24 +123,26 @@ Bu proje staj teslimi amacıyla hazırlanmış olup, staj sorumlusunun sistemi f
 Support Ticket System/
 │
 ├── config/                     # Django Proje Çekirdek Ayarları
-│   ├── asgi.py                 # WebSocket ve Channels yönlendirmeleri (Daphne)
+│   ├── asgi.py                 # WebSocket ve Channels yönlendirmeleri (Daphne ASGI)
 │   ├── settings.py             # 12-Factor .env destekli sistem ayarları & Redis/LocMem Cache
 │   ├── urls.py                 # Ana URL haritası ve super-admin rotası
 │   └── wsgi.py                 # WSGI üretim dağıtım dosyası
 │
 ├── tickets/                    # Ana Destek Sistemi Uygulaması
+│   ├── admin.py                # Süper Yönetici Paneli Model Tanımları & Gelişmiş Filtreler
 │   ├── consumers.py            # WebSocket Tüketicileri (Ekip Sohbeti & Canlı Talep)
+│   ├── context_processors.py   # Dinamik Okunmamış Bildirim Sayacı & Global Bildirim Sağlayıcı
+│   ├── copilot.py              # Akıllı Kategori/Öncelik Sezgisel Motoru & Özetleyici
 │   ├── forms.py                # Güvenlikli Formlar, XSS Temizliği & CustomPasswordResetForm
 │   ├── middleware.py           # Özel 404/403/500 Hata Yakalayıcı ve AJAX Koruyucu
 │   ├── models.py               # Ticket, Comment, Tag, CSAT, SLA, Chat, Profil Modelleri
 │   ├── pdf.py                  # Çapraz Platform Kurumsal Antetli PDF Rapor Üreticisi
-│   ├── copilot.py              # Akıllı Kategori/Öncelik Sezgisel Motoru & Özetleyici
-│   ├── webhooks.py             # Slack / Discord Asenkron Acil Durum Webhook İstemcisi
 │   ├── routing.py              # WebSocket URL rotaları
 │   ├── tests.py                # 107 Kapsamlı Otomasyon & Güvenlik Testi (%100 Başarı)
 │   ├── totp.py                 # RFC 6238 TOTP 2FA ve QR Kod Motoru
 │   ├── urls.py                 # Uygulama içi rotalar ve API uç noktaları
 │   ├── validators.py           # Magic bytes dosya imza, boyut ve güvenlik doğrulayıcıları
+│   ├── webhooks.py             # Slack / Discord Asenkron Acil Durum Webhook İstemcisi
 │   │
 │   ├── views/                  # Modüler Görünüm Katmanı (Clean Architecture)
 │   │   ├── __init__.py         # Tüm görünümleri dışa aktaran modüler köprü
@@ -172,8 +174,10 @@ Support Ticket System/
 ├── templates/                  # Genel Şablonlar (base.html, 404.html, 403.html, 500.html)
 ├── media/                      # Kullanıcı ekleri ve profil fotoğrafları (yetki korumalı)
 ├── logs/                       # Otomatik rotasyonlu merkezi log dosyaları
-├── .env.example                # Örnek ortam değişkenleri şablonu (PostgreSQL, Redis, SMTP)
+├── db.sqlite3                  # Yerel Geliştirme Veritabanı (Canlıda PostgreSQL)
+├── .env.example                # Örnek ortam değişkenleri şablonu (PostgreSQL, Redis, SMTP, CSRF)
 ├── requirements.txt            # Python bağımlılıkları listesi
+├── manage.py                   # Django CLI yönetim giriş noktası
 └── README.md                   # Güncel proje dokümantasyonu
 ```
 
@@ -192,10 +196,13 @@ cd "Support Ticket System"
 
 * **Windows (PowerShell):**
   ```powershell
+  # Betik çalıştırma kısıtlaması varsa yalnızca bu oturum için izin verin:
+  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
   python -m venv venv
   .\venv\Scripts\Activate.ps1
   ```
-  *(veya CMD: `venv\Scripts\activate.bat`)*
+  *(veya Klasik CMD: `venv\Scripts\activate.bat`)*
 
 * **Linux / macOS:**
   ```bash
@@ -208,27 +215,45 @@ cd "Support Ticket System"
 pip install -r requirements.txt
 ```
 
-### 4. Veritabanı Tablolarını Oluşturun
+### 4. Ortam Değişkenleri (.env) Yapılandırması (İsteğe Bağlı)
+Yerel test ortamı için varsayılan SQLite ve Terminal Konsol e-posta motoru otomatik çalışır. Canlı ortam veya özel ayarlar için `.env.example` dosyasını kopyalayabilirsiniz:
+```bash
+# Windows PowerShell:
+Copy-Item .env.example .env
+
+# Linux / macOS:
+cp .env.example .env
+```
+
+### 5. Veritabanı Tablolarını Oluşturun
 ```bash
 python manage.py migrate
 ```
 
-### 5. Demo Verilerini ve Test Hesaplarını Yükleyin (Önerilen)
+### 6. Demo Verilerini ve Test Hesaplarını Yükleyin (Önerilen)
 Sistemi sıfırdan hesap açmakla uğraşmadan hemen test edebilmeniz için tek komutla tüm demo ortamını hazırlayabilirsiniz:
 ```bash
 python manage.py seed_demo_data
 ```
 > Bu komut; Süper Yönetici, Destek Uzmanı, Finans Uzmanı ve Müşteri hesaplarını oluşturur; gerçekçi destek taleplerini, bilgi bankası makalelerini ve hazır yanıt şablonlarını otomatik yükler.
 
-### 6. Geliştirme Sunucusunu Başlatın
-```bash
-python manage.py runserver
-```
+### 7. Sunucuyu Başlatın
+
+* **Geliştirme Sunucusu (Dahili Daphne ASGI Destekli):**
+  ```bash
+  python manage.py runserver
+  ```
+
+* **Üretim / Canlı Ortam Dağıtımı (Daphne ASGI):**
+  ```bash
+  daphne -b 0.0.0.0 -p 8000 config.asgi:application
+  ```
+
 Tarayıcınızdan **`http://127.0.0.1:8000/`** adresine giderek uygulamayı test etmeye başlayabilirsiniz!
 
 ---
 
-## 🧭5 Dakikalık Test Turu
+## 🧭 5 Dakikalık Test Turu
 
 Projeyi test ederken şu akışı izleyerek tüm modülleri deneyimleyebilirsiniz:
 
@@ -241,7 +266,11 @@ Projeyi test ederken şu akışı izleyerek tüm modülleri deneyimleyebilirsini
 3. **Müşteri / Personel Girişi:** `ahmet_yilmaz` / `User123!` ile giriş yapın.
    - Çözülen e-fatura talebini inceleyin ve sayfa altındaki **5 Yıldızlı Memnuniyet (CSAT)** anketini oylayın.
    - **"Yeni Talep Oluştur"** butonuna basarak başlığa göre canlı Bilgi Bankası (SSS) makalesi öneren yapay zeka sezgisel motorunu test edin.
-4. **Arka Plan Görev Otomasyonunu Test Edin:**
+4. **E-Posta Servisini Test Edin (Console / SMTP):**
+   ```bash
+   python manage.py send_test_email test@desteksistemi.com
+   ```
+5. **Arka Plan Görev Otomasyonunu Test Edin:**
    ```bash
    python manage.py run_scheduler --run-once
    ```
